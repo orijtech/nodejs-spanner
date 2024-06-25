@@ -345,9 +345,12 @@ export class SpannerClient {
                         'The client has already been closed'
                       )
                     );
+                    span.end();
                   });
                   return stream;
                 }
+
+                span.end();
                 return Promise.reject('The client has already been closed.');
               }
 
