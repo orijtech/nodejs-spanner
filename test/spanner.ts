@@ -197,6 +197,7 @@ describe('Spanner with mock server', () => {
         (rows as Row[]).forEach(row => {
           i++;
           const [numCol, nameCol] = row;
+          console.log('numCol', numCol, 'nameCol', nameCol);
           assert.strictEqual(numCol.name, 'NUM');
           assert.strictEqual(numCol.value.valueOf(), i);
           assert.strictEqual(nameCol.name, 'NAME');
