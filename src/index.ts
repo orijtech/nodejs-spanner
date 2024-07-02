@@ -1373,6 +1373,13 @@ class Spanner extends GrpcService {
             headers: this.resourceHeader_,
           },
           (err, instanceConfig) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+            span.end();
             callback!(err, instanceConfig);
           }
         );

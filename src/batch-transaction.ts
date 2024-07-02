@@ -25,6 +25,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
+import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;
@@ -163,38 +164,50 @@ class BatchTransaction extends Snapshot {
    * @param {function} callback Callback function.
    */
   createPartitions_(config, callback) {
-    const query = extend({}, config.reqOpts, {
-      session: this.session.formattedName_,
-      transaction: {id: this.id},
-    });
-    config.reqOpts = extend({}, query);
-    config.headers = {
-      [CLOUD_RESOURCE_HEADER]: (this.session.parent as Database).formattedName_,
-    };
-    delete query.partitionOptions;
-    this.session.request(config, (err, resp) => {
-      if (err) {
-        callback(err, null, resp);
-        return;
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/BatchTransaction.createPartitions',
+      span => {
+        const query = extend({}, config.reqOpts, {
+          session: this.session.formattedName_,
+          transaction: {id: this.id},
+        });
+        config.reqOpts = extend({}, query);
+        config.headers = {
+          [CLOUD_RESOURCE_HEADER]: (this.session.parent as Database)
+            .formattedName_,
+        };
+        delete query.partitionOptions;
+        this.session.request(config, (err, resp) => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            callback(err, null, resp);
+            return;
+          }
+
+          const partitions = resp.partitions.map(partition => {
+            return extend({}, query, partition);
+          });
+
+          if (resp.transaction) {
+            const {id, readTimestamp} = resp.transaction;
+
+            this.id = id;
+
+            if (readTimestamp) {
+              this.readTimestampProto = readTimestamp;
+              this.readTimestamp = new PreciseDate(readTimestamp);
+            }
+          }
+
+          span.end();
+          callback(null, partitions, resp);
+        });
       }
-
-      const partitions = resp.partitions.map(partition => {
-        return extend({}, query, partition);
-      });
-
-      if (resp.transaction) {
-        const {id, readTimestamp} = resp.transaction;
-
-        this.id = id;
-
-        if (readTimestamp) {
-          this.readTimestampProto = readTimestamp;
-          this.readTimestamp = new PreciseDate(readTimestamp);
-        }
-      }
-
-      callback(null, partitions, resp);
-    });
+    );
   }
   /**
    * @typedef {object} ReadPartition
@@ -226,28 +239,43 @@ class BatchTransaction extends Snapshot {
    * @returns {Promise<CreateReadPartitionsResponse>}
    */
   createReadPartitions(options, callback) {
-    const reqOpts = Object.assign({}, options, {
-      keySet: Snapshot.encodeKeySet(options),
-    });
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/BatchTransaction.createReadPartitions',
+      span => {
+        const reqOpts = Object.assign({}, options, {
+          keySet: Snapshot.encodeKeySet(options),
+        });
 
-    delete reqOpts.gaxOptions;
-    delete reqOpts.keys;
-    delete reqOpts.ranges;
+        delete reqOpts.gaxOptions;
+        delete reqOpts.keys;
+        delete reqOpts.ranges;
 
-    const headers: {[k: string]: string} = {};
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
+        const headers: {[k: string]: string} = {};
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
 
-    this.createPartitions_(
-      {
-        client: 'SpannerClient',
-        method: 'partitionRead',
-        reqOpts,
-        gaxOpts: options.gaxOptions,
-        headers: headers,
-      },
-      callback
+        this.createPartitions_(
+          {
+            client: 'SpannerClient',
+            method: 'partitionRead',
+            reqOpts,
+            gaxOpts: options.gaxOptions,
+            headers: headers,
+          },
+          (err, partitions, resp) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+
+            span.end();
+            callback(err, partitions, resp);
+          }
+        );
+      }
     );
   }
   /**
