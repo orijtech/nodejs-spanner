@@ -331,6 +331,7 @@ export class SpannerClient {
         stub =>
           (...args: Array<{}>) => {
             return tracer.startActiveSpan(spanName, span => {
+              console.log(`span: ${span}`);
               if (this._terminated) {
                 if (methodName in this.descriptors.stream) {
                   const stream = new PassThrough();

@@ -86,6 +86,25 @@ async function addColumn(instanceId, databaseId, projectId) {
 
   // Imports the Google Cloud client library
   const {Spanner} = require('@google-cloud/spanner');
+  const {NodeSDK} = require('@opentelemetry/sdk-node');
+  const {ConsoleSpanExporter} = require('@opentelemetry/sdk-trace-node');
+  const {
+    getNodeAutoInstrumentations,
+  } = require('@opentelemetry/auto-instrumentations-node');
+  const {
+    PeriodicExportingMetricReader,
+    ConsoleMetricExporter,
+  } = require('@opentelemetry/sdk-metrics');
+
+  const sdk = new NodeSDK({
+    traceExporter: new ConsoleSpanExporter(),
+    metricReader: new PeriodicExportingMetricReader({
+      exporter: new ConsoleMetricExporter(),
+    }),
+    instrumentations: [getNodeAutoInstrumentations()],
+  });
+
+  sdk.start();
 
   // creates a client
   const spanner = new Spanner({

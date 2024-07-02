@@ -19,3 +19,4 @@ const tracer = opentelemetry.trace.getTracer('nodejs-spanner', 'v1.0.0');
 const SPAN_CODE_ERROR = SpanStatusCode.ERROR;
 
 export {SPAN_CODE_ERROR, tracer};
+console.log('instrument');
