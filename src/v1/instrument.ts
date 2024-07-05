@@ -19,9 +19,6 @@ const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
 const {NodeTracerProvider} = require('@opentelemetry/sdk-trace-node');
 const {registerInstrumentations} = require('@opentelemetry/instrumentation');
-registerInstrumentations({
-  instrumentations: [new GrpcInstrumentation()],
-});
 
 // TODO: Infer the tracer from either the provided context or globally.
 const tracer = opentelemetry.trace.getTracer('nodejs-spanner', 'v1.0.0');
@@ -50,4 +47,8 @@ export function startTraceExport(exporter) {
   const provider = new NodeTracerProvider();
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
+
+  registerInstrumentations({
+    instrumentations: [new GrpcInstrumentation()],
+  });
 }

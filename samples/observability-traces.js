@@ -21,13 +21,17 @@ function exportSpans(instanceId, databaseId, projectId) {
   // const {TraceExporter} = require('@google-cloud/opentelemetry-cloud-trace-exporter');
   const {Resource} = require('@opentelemetry/resources');
   const {NodeSDK} = require('@opentelemetry/sdk-node');
-  const {WebTracerProvider} = require('@opentelemetry/sdk-trace-web');
+  const {NodeTracerProvider, TraceIdRatioBasedSampler} = require('@opentelemetry/sdk-trace-node');
+  const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
+  const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
+  const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+  // const {startTraceExport} = require('@google-cloud/spanner');
   const {
     SEMRESATTRS_SERVICE_NAME,
     SEMRESATTRS_SERVICE_VERSION,
   } = require('@opentelemetry/semantic-conventions');
   const {
-    BatchSpanProcessor,
+    SimpleSpanProcessor,
     ConsoleSpanExporter,
   } = require('@opentelemetry/sdk-trace-base');
 
@@ -41,12 +45,18 @@ function exportSpans(instanceId, databaseId, projectId) {
   const sdk = new NodeSDK({
     resource: resource,
     traceExporter: exporter,
+    sampler: new TraceIdRatioBasedSampler(1.0),
   });
   sdk.start();
-  const provider = new WebTracerProvider({resource: resource});
-  const processor = new BatchSpanProcessor(exporter);
-  provider.addSpanProcessor(processor);
+
+  // startTraceExport(exporter);
+  const provider = new NodeTracerProvider();
+  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
+
+  registerInstrumentations({
+    instrumentations: [new GrpcInstrumentation()],
+  });
 
   /**
    * TODO(developer): Uncomment the following lines before running the sample.
@@ -72,25 +82,29 @@ function exportSpans(instanceId, databaseId, projectId) {
       return;
     }
     const queryOne =
-      'SELECT * FROM exchange_rates ORDER BY created_at DESC limit 10';
+      'SELECT * FROM Singers';
 
-    try {
-      // Read #1, using SQL
-      const [qOneRows] = await transaction.run(queryOne);
+    let i = 0;
+    for (i = 0; i < 100; i++) {
+      try {
+        // Read #1, using SQL
+        const [qOneRows] = await transaction.run(queryOne);
 
-      qOneRows.forEach(row => {
-        const json = row.toJSON();
-        console.log(
-          `Id: ${json.id}, Value: ${json.value}, BaseCurrency: ${json.base_curr}`
-        );
-      });
-      console.log('Successfully executed read-only transaction.');
-    } catch (err) {
-      console.error('ERROR:', err);
-    } finally {
-      transaction.end();
-      // Close the database when finished.
-      await database.close();
+        qOneRows.forEach(row => {
+          const json = row.toJSON();
+          console.log(
+            `Id: ${json.id}, Value: ${json.value}, BaseCurrency: ${json.base_curr}`
+          );
+        });
+        console.log('Successfully executed read-only transaction.');
+      } catch (err) {
+        console.error('ERROR:', err);
+      } finally {
+        transaction.end();
+        // Close the database when finished.
+        await database.close();
+        console.log("Completed");
+      }
     }
   });
   // [END spanner_export_traces]

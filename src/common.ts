@@ -17,6 +17,7 @@
 import {grpc, CallOptions, Operation as GaxOperation} from 'google-gax';
 import {google as instanceAdmin} from '../protos/protos';
 import {google as databaseAdmin} from '../protos/protos';
+import {startTraceExport} from './v1/instrument';
 
 export type IOperation = instanceAdmin.longrunning.IOperation;
 
@@ -87,4 +88,8 @@ export const LEADER_AWARE_ROUTING_HEADER = 'x-goog-spanner-route-to-leader';
  */
 export function addLeaderAwareRoutingHeader(headers: {[k: string]: string}) {
   headers[LEADER_AWARE_ROUTING_HEADER] = 'true';
+}
+
+export function startTraceExporting(exporter) {
+  startTraceExport(exporter);
 }
