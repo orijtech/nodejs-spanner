@@ -40,6 +40,8 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './database_admin_client_config.json';
 const version = require('../../../package.json').version;
 
+import {tracer, SPAN_CODE_ERROR} from './instrument';
+
 /**
  *  Cloud Spanner Database Admin API
  *
@@ -473,11 +475,25 @@ export class DatabaseAdminClient {
       const callPromise = this.databaseAdminStub.then(
         stub =>
           (...args: Array<{}>) => {
-            if (this._terminated) {
-              return Promise.reject('The client has already been closed.');
-            }
-            const func = stub[methodName];
-            return func.apply(stub, args);
+            return tracer.startActiveSpan(
+              'cloud.google.com/nodejs/spanner/DatabaseAdminClient.' +
+                methodName,
+              span => {
+                if (this._terminated) {
+                  const msg = 'The client has already been closed.';
+                  span.setStatus({
+                    code: SPAN_CODE_ERROR,
+                    message: msg,
+                  });
+                  span.end();
+                  return Promise.reject(msg);
+                }
+                const func = stub[methodName];
+                const result = func.apply(stub, args);
+                span.end();
+                return result;
+              }
+            );
           },
         (err: Error | null | undefined) => () => {
           throw err;

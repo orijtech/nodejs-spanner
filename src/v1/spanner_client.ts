@@ -331,28 +331,23 @@ export class SpannerClient {
         stub =>
           (...args: Array<{}>) => {
             return tracer.startActiveSpan(spanName, span => {
-              console.log(`span: ${span}`);
+              const msg = 'The client has already been closed';
               if (this._terminated) {
                 if (methodName in this.descriptors.stream) {
                   const stream = new PassThrough();
                   setImmediate(() => {
                     span.setStatus({
                       code: SPAN_CODE_ERROR,
-                      message: 'The client has already been closed',
+                      message: msg,
                     });
-                    stream.emit(
-                      'error',
-                      new this._gaxModule.GoogleError(
-                        'The client has already been closed'
-                      )
-                    );
+                    stream.emit('error', new this._gaxModule.GoogleError(msg));
                     span.end();
                   });
                   return stream;
                 }
 
                 span.end();
-                return Promise.reject('The client has already been closed.');
+                return Promise.reject(msg);
               }
 
               // In this path, the client hasn't yet been terminated.

@@ -3119,12 +3119,22 @@ class Database extends common.GrpcServiceObject {
             : {};
 
         this.pool_.getSession((err, session?, transaction?) => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+          }
+
           if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
             this.runTransaction(options, runFn!);
+            span.end();
             return;
           }
+
           if (err) {
             runFn!(err as grpc.ServiceError);
+            span.end();
             return;
           }
           if (options.optimisticLock) {
@@ -3146,9 +3156,11 @@ class Database extends common.GrpcServiceObject {
             if (isSessionNotFoundError(err)) {
               release();
               this.runTransaction(options, runFn!);
+              span.end();
             } else {
               setImmediate(runFn!, err);
               release();
+              span.end();
             }
           });
         });

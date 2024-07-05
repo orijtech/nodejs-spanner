@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import opentelemetry, {SpanStatusCode, Tracer} from '@opentelemetry/api';
+import opentelemetry, {SpanStatusCode} from '@opentelemetry/api';
 
 // Ensure that we've registered the gRPC instrumentation.
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
