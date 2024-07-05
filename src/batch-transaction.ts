@@ -126,31 +126,46 @@ class BatchTransaction extends Snapshot {
    * region_tag:spanner_batch_client
    */
   createQueryPartitions(query, callback) {
-    if (is.string(query)) {
-      query = {
-        sql: query,
-      };
-    }
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/BatchTransaction.createQueryPartitions',
+      span => {
+        if (is.string(query)) {
+          query = {
+            sql: query,
+          };
+        }
 
-    const reqOpts = Object.assign({}, query, Snapshot.encodeParams(query));
+        const reqOpts = Object.assign({}, query, Snapshot.encodeParams(query));
 
-    delete reqOpts.gaxOptions;
-    delete reqOpts.types;
+        delete reqOpts.gaxOptions;
+        delete reqOpts.types;
 
-    const headers: {[k: string]: string} = {};
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
+        const headers: {[k: string]: string} = {};
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
 
-    this.createPartitions_(
-      {
-        client: 'SpannerClient',
-        method: 'partitionQuery',
-        reqOpts,
-        gaxOpts: query.gaxOptions,
-        headers: headers,
-      },
-      callback
+        this.createPartitions_(
+          {
+            client: 'SpannerClient',
+            method: 'partitionQuery',
+            reqOpts,
+            gaxOpts: query.gaxOptions,
+            headers: headers,
+          },
+          (err, partitions, resp) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+
+            span.end();
+            callback(err, partitions, resp);
+          }
+        );
+      }
     );
   }
   /**
@@ -350,6 +365,7 @@ class BatchTransaction extends Snapshot {
    * ```
    */
   executeStream(partition) {
+    // TODO: Instrument the streams with Otel.
     if (is.string(partition.table)) {
       return this.createReadStream(partition.table, partition);
     }

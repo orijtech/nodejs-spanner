@@ -31,6 +31,7 @@ import {
 import {google as databaseAdmin} from '../protos/protos';
 import {Schema, LongRunningCallback} from './common';
 import IRequestOptions = databaseAdmin.spanner.v1.IRequestOptions;
+import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type Key = string | string[];
 
@@ -1072,27 +1073,38 @@ class Table {
     options: MutateRowsOptions | CallOptions = {},
     callback: CommitCallback
   ): void {
-    const requestOptions =
-      'requestOptions' in options ? options.requestOptions : {};
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Table.' + method,
+      span => {
+        const requestOptions =
+          'requestOptions' in options ? options.requestOptions : {};
 
-    const excludeTxnFromChangeStreams =
-      'excludeTxnFromChangeStreams' in options
-        ? options.excludeTxnFromChangeStreams
-        : false;
+        const excludeTxnFromChangeStreams =
+          'excludeTxnFromChangeStreams' in options
+            ? options.excludeTxnFromChangeStreams
+            : false;
 
-    this.database.runTransaction(
-      {
-        requestOptions: requestOptions,
-        excludeTxnFromChangeStreams: excludeTxnFromChangeStreams,
-      },
-      (err, transaction) => {
-        if (err) {
-          callback(err);
-          return;
-        }
+        this.database.runTransaction(
+          {
+            requestOptions: requestOptions,
+            excludeTxnFromChangeStreams: excludeTxnFromChangeStreams,
+          },
+          (err, transaction) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              span.end();
+              callback(err);
+              return;
+            }
 
-        transaction![method](this.name, rows as Key[]);
-        transaction!.commit(options, callback);
+            span.end();
+            transaction![method](this.name, rows as Key[]);
+            transaction!.commit(options, callback);
+          }
+        );
       }
     );
   }

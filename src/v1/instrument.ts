@@ -17,6 +17,7 @@ import opentelemetry, {SpanStatusCode, Tracer} from '@opentelemetry/api';
 // Ensure that we've registered the gRPC instrumentation.
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
+const {NodeTracerProvider} = require('@opentelemetry/sdk-trace-node');
 const {registerInstrumentations} = require('@opentelemetry/instrumentation');
 registerInstrumentations({
   instrumentations: [new GrpcInstrumentation()],
@@ -46,7 +47,7 @@ export function spanCode(span, err) {
 }
 
 export function startTraceExport(exporter) {
-  const provider = new NodeTraceProvider();
+  const provider = new NodeTracerProvider();
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
 }

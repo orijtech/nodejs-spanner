@@ -45,7 +45,7 @@ function exportSpans(instanceId, databaseId, projectId) {
   sdk.start();
   const provider = new WebTracerProvider({resource: resource});
   const processor = new BatchSpanProcessor(exporter);
-  provider.addSpanProcessor(exporter);
+  provider.addSpanProcessor(processor);
   provider.register();
 
   /**

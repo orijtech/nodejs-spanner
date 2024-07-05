@@ -102,6 +102,7 @@ import Policy = google.iam.v1.Policy;
 import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
+import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
   IDatabaseRole,
@@ -399,6 +400,7 @@ class Database extends common.GrpcServiceObject {
         options: CreateDatabaseOptions,
         callback: CreateDatabaseCallback
       ) => {
+        // TODO: Instrument this method with OpenTelemetry.
         const pool = this.pool_ as SessionPool;
         if (pool._pending > 0) {
           // If there are BatchCreateSessions requests pending, then we should
@@ -534,31 +536,39 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | SetDatabaseMetadataCallback,
     cb?: SetDatabaseMetadataCallback
   ): void | Promise<SetDatabaseMetadataResponse> {
-    const gaxOpts =
-      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-    const callback =
-      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Database.setMetadata',
+      span => {
+        const gaxOpts =
+          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+        const callback =
+          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-    const reqOpts = {
-      database: extend(
-        {
-          name: this.formattedName_,
-        },
-        metadata
-      ),
-      updateMask: {
-        paths: Object.keys(metadata).map(snakeCase),
-      },
-    };
-    return this.request(
-      {
-        client: 'DatabaseAdminClient',
-        method: 'updateDatabase',
-        reqOpts,
-        gaxOpts,
-        headers: this.resourceHeader_,
-      },
-      callback!
+        const reqOpts = {
+          database: extend(
+            {
+              name: this.formattedName_,
+            },
+            metadata
+          ),
+          updateMask: {
+            paths: Object.keys(metadata).map(snakeCase),
+          },
+        };
+        return this.request(
+          {
+            client: 'DatabaseAdminClient',
+            method: 'updateDatabase',
+            reqOpts,
+            gaxOpts,
+            headers: this.resourceHeader_,
+          },
+          data => {
+            span.end();
+            callback!(data);
+          }
+        );
+      }
     );
   }
 
@@ -648,46 +658,57 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
-    if (typeof options === 'number') {
-      options = {count: options};
-    }
-
-    const count = options.count;
-    const labels = options.labels || {};
-    const databaseRole = options.databaseRole || this.databaseRole || null;
-
-    const reqOpts: google.spanner.v1.IBatchCreateSessionsRequest = {
-      database: this.formattedName_,
-      sessionTemplate: {labels: labels, creatorRole: databaseRole},
-      sessionCount: count,
-    };
-
-    const headers = this.resourceHeader_;
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
-
-    this.request<google.spanner.v1.IBatchCreateSessionsResponse>(
-      {
-        client: 'SpannerClient',
-        method: 'batchCreateSessions',
-        reqOpts,
-        gaxOpts: options.gaxOptions,
-        headers: headers,
-      },
-      (err, resp) => {
-        if (err) {
-          callback!(err, null, resp!);
-          return;
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
+      span => {
+        if (typeof options === 'number') {
+          options = {count: options};
         }
 
-        const sessions = (resp!.session || []).map(metadata => {
-          const session = this.session(metadata.name!);
-          session.metadata = metadata;
-          return session;
-        });
+        const count = options.count;
+        const labels = options.labels || {};
+        const databaseRole = options.databaseRole || this.databaseRole || null;
 
-        callback!(null, sessions, resp!);
+        const reqOpts: google.spanner.v1.IBatchCreateSessionsRequest = {
+          database: this.formattedName_,
+          sessionTemplate: {labels: labels, creatorRole: databaseRole},
+          sessionCount: count,
+        };
+
+        const headers = this.resourceHeader_;
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
+
+        this.request<google.spanner.v1.IBatchCreateSessionsResponse>(
+          {
+            client: 'SpannerClient',
+            method: 'batchCreateSessions',
+            reqOpts,
+            gaxOpts: options.gaxOptions,
+            headers: headers,
+          },
+          (err, resp) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              span.end();
+              callback!(err, null, resp!);
+              return;
+            }
+
+            const sessions = (resp!.session || []).map(metadata => {
+              const session = this.session(metadata.name!);
+              session.metadata = metadata;
+              return session;
+            });
+
+            span.end();
+            callback!(null, sessions, resp!);
+          }
+        );
       }
     );
   }
@@ -772,10 +793,24 @@ class Database extends common.GrpcServiceObject {
   close(
     callback?: SessionPoolCloseCallback
   ): void | Promise<DatabaseCloseResponse> {
-    const key = this.id!.split('/').pop();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.parent as any).databases_.delete(key);
-    this.pool_.close(callback!);
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Database.close',
+      span => {
+        const key = this.id!.split('/').pop();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (this.parent as any).databases_.delete(key);
+        this.pool_.close(err => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+          }
+          span.end();
+          callback!(err);
+        });
+      }
+    );
   }
   /**
    * @typedef {array} CreateTransactionResponse
@@ -3071,49 +3106,54 @@ class Database extends common.GrpcServiceObject {
     optionsOrRunFn: RunTransactionOptions | RunTransactionCallback,
     fn?: RunTransactionCallback
   ): void {
-    const runFn =
-      typeof optionsOrRunFn === 'function'
-        ? (optionsOrRunFn as RunTransactionCallback)
-        : fn;
-    const options =
-      typeof optionsOrRunFn === 'object' && optionsOrRunFn
-        ? (optionsOrRunFn as RunTransactionOptions)
-        : {};
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Database.runTransaction',
+      span => {
+        const runFn =
+          typeof optionsOrRunFn === 'function'
+            ? (optionsOrRunFn as RunTransactionCallback)
+            : fn;
+        const options =
+          typeof optionsOrRunFn === 'object' && optionsOrRunFn
+            ? (optionsOrRunFn as RunTransactionOptions)
+            : {};
 
-    this.pool_.getSession((err, session?, transaction?) => {
-      if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
-        this.runTransaction(options, runFn!);
-        return;
-      }
-      if (err) {
-        runFn!(err as grpc.ServiceError);
-        return;
-      }
-      if (options.optimisticLock) {
-        transaction!.useOptimisticLock();
-      }
-      if (options.excludeTxnFromChangeStreams) {
-        transaction!.excludeTxnFromChangeStreams();
-      }
+        this.pool_.getSession((err, session?, transaction?) => {
+          if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
+            this.runTransaction(options, runFn!);
+            return;
+          }
+          if (err) {
+            runFn!(err as grpc.ServiceError);
+            return;
+          }
+          if (options.optimisticLock) {
+            transaction!.useOptimisticLock();
+          }
+          if (options.excludeTxnFromChangeStreams) {
+            transaction!.excludeTxnFromChangeStreams();
+          }
 
-      const release = this.pool_.release.bind(this.pool_, session!);
-      const runner = new TransactionRunner(
-        session!,
-        transaction!,
-        runFn!,
-        options
-      );
+          const release = this.pool_.release.bind(this.pool_, session!);
+          const runner = new TransactionRunner(
+            session!,
+            transaction!,
+            runFn!,
+            options
+          );
 
-      runner.run().then(release, err => {
-        if (isSessionNotFoundError(err)) {
-          release();
-          this.runTransaction(options, runFn!);
-        } else {
-          setImmediate(runFn!, err);
-          release();
-        }
-      });
-    });
+          runner.run().then(release, err => {
+            if (isSessionNotFoundError(err)) {
+              release();
+              this.runTransaction(options, runFn!);
+            } else {
+              setImmediate(runFn!, err);
+              release();
+            }
+          });
+        });
+      }
+    );
   }
 
   runTransactionAsync<T = {}>(
