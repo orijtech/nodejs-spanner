@@ -22,7 +22,7 @@ import {EventEmitter} from 'events';
 import {grpc, CallOptions, ServiceError, Status, GoogleError} from 'google-gax';
 import * as is from 'is';
 import {common as p} from 'protobufjs';
-import {Readable, PassThrough} from 'stream';
+import {finished, Readable, PassThrough} from 'stream';
 
 import {codec, Json, JSONOptions, Type, Value} from './codec';
 import {
@@ -45,6 +45,7 @@ import IQueryOptions = google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Database, Spanner} from '.';
 import ReadLockMode = google.spanner.v1.TransactionOptions.ReadWrite.ReadLockMode;
+import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type Rows = Array<Row | Json>;
 const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.retryinfo';
@@ -1000,23 +1001,42 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
-    const rows: Rows = [];
-    let stats: google.spanner.v1.ResultSetStats;
-    let metadata: google.spanner.v1.ResultSetMetadata;
+    console.log('Transaction.run');
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.run',
+      span => {
+        const rows: Rows = [];
+        let stats: google.spanner.v1.ResultSetStats;
+        let metadata: google.spanner.v1.ResultSetMetadata;
 
-    this.runStream(query)
-      .on('error', callback!)
-      .on('response', response => {
-        if (response.metadata) {
-          metadata = response.metadata;
-          if (metadata.transaction && !this.id) {
-            this._update(metadata.transaction);
-          }
-        }
-      })
-      .on('data', row => rows.push(row))
-      .on('stats', _stats => (stats = _stats))
-      .on('end', () => callback!(null, rows, stats, metadata));
+        this.runStream(query)
+          .on('error', (err, rows, stats, metadata) => {
+            console.log('event.err');
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            callback!(err, rows, stats, metadata);
+          })
+          .on('response', response => {
+            console.log('event.response');
+            if (response.metadata) {
+              metadata = response.metadata;
+              if (metadata.transaction && !this.id) {
+                this._update(metadata.transaction);
+              }
+            }
+          })
+          .on('data', row => rows.push(row))
+          .on('stats', _stats => (stats = _stats))
+          .on('end', () => {
+            console.log('event.end');
+            span.end();
+            callback!(null, rows, stats, metadata);
+          });
+      }
+    );
   }
 
   /**
@@ -1119,111 +1139,132 @@ export class Snapshot extends EventEmitter {
    * ```
    */
   runStream(query: string | ExecuteSqlRequest): PartialResultStream {
-    if (typeof query === 'string') {
-      query = {sql: query} as ExecuteSqlRequest;
-    }
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.runStream',
+      span => {
+        if (typeof query === 'string') {
+          query = {sql: query} as ExecuteSqlRequest;
+        }
 
-    query = Object.assign({}, query) as ExecuteSqlRequest;
-    query.queryOptions = Object.assign(
-      Object.assign({}, this.queryOptions),
-      query.queryOptions
-    );
+        query = Object.assign({}, query) as ExecuteSqlRequest;
+        query.queryOptions = Object.assign(
+          Object.assign({}, this.queryOptions),
+          query.queryOptions
+        );
 
-    const {
-      gaxOptions,
-      json,
-      jsonOptions,
-      maxResumeRetries,
-      requestOptions,
-      columnsMetadata,
-    } = query;
-    let reqOpts;
+        const {
+          gaxOptions,
+          json,
+          jsonOptions,
+          maxResumeRetries,
+          requestOptions,
+          columnsMetadata,
+        } = query;
+        let reqOpts;
 
-    const directedReadOptions = this._getDirectedReadOptions(
-      query.directedReadOptions
-    );
+        const directedReadOptions = this._getDirectedReadOptions(
+          query.directedReadOptions
+        );
 
-    const sanitizeRequest = () => {
-      query = query as ExecuteSqlRequest;
-      const {params, paramTypes} = Snapshot.encodeParams(query);
-      const transaction: spannerClient.spanner.v1.ITransactionSelector = {};
-      if (this.id) {
-        transaction.id = this.id as Uint8Array;
-      } else if (this._options.readWrite) {
-        transaction.begin = this._options;
-      } else {
-        transaction.singleUse = this._options;
+        const sanitizeRequest = () => {
+          query = query as ExecuteSqlRequest;
+          const {params, paramTypes} = Snapshot.encodeParams(query);
+          const transaction: spannerClient.spanner.v1.ITransactionSelector = {};
+          if (this.id) {
+            transaction.id = this.id as Uint8Array;
+          } else if (this._options.readWrite) {
+            transaction.begin = this._options;
+          } else {
+            transaction.singleUse = this._options;
+          }
+          delete query.gaxOptions;
+          delete query.json;
+          delete query.jsonOptions;
+          delete query.maxResumeRetries;
+          delete query.requestOptions;
+          delete query.types;
+          delete query.directedReadOptions;
+          delete query.columnsMetadata;
+
+          reqOpts = Object.assign(query, {
+            session: this.session.formattedName_!,
+            seqno: this._seqno++,
+            requestOptions: this.configureTagOptions(
+              typeof transaction.singleUse !== 'undefined',
+              this.requestOptions?.transactionTag ?? undefined,
+              requestOptions
+            ),
+            directedReadOptions: directedReadOptions,
+            transaction,
+            params,
+            paramTypes,
+          });
+        };
+
+        const headers = this.resourceHeader_;
+        if (
+          this._getSpanner().routeToLeaderEnabled &&
+          (this._options.readWrite !== undefined ||
+            this._options.partitionedDml !== undefined)
+        ) {
+          addLeaderAwareRoutingHeader(headers);
+        }
+
+        const makeRequest = (resumeToken?: ResumeToken): Readable => {
+          if (!reqOpts || (this.id && !reqOpts.transaction.id)) {
+            try {
+              sanitizeRequest();
+            } catch (e) {
+              const errorStream = new PassThrough();
+              setImmediate(() => errorStream.destroy(e as Error));
+              return errorStream;
+            }
+          }
+
+          return this.requestStream({
+            client: 'SpannerClient',
+            method: 'executeStreamingSql',
+            reqOpts: Object.assign({}, reqOpts, {resumeToken}),
+            gaxOpts: gaxOptions,
+            headers: headers,
+          });
+        };
+
+        const prs = partialResultStream(this._wrapWithIdWaiter(makeRequest), {
+          json,
+          jsonOptions,
+          maxResumeRetries,
+          columnsMetadata,
+          gaxOptions,
+        })
+          .on('response', response => {
+            if (
+              response.metadata &&
+              response.metadata!.transaction &&
+              !this.id
+            ) {
+              this._update(response.metadata!.transaction);
+            }
+          })
+          .on('error', () => {
+            if (!this.id && this._useInRunner) {
+              this.begin();
+            }
+          });
+
+        finished(prs, err => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+          }
+          span.end();
+        });
+
+        return prs;
       }
-      delete query.gaxOptions;
-      delete query.json;
-      delete query.jsonOptions;
-      delete query.maxResumeRetries;
-      delete query.requestOptions;
-      delete query.types;
-      delete query.directedReadOptions;
-      delete query.columnsMetadata;
-
-      reqOpts = Object.assign(query, {
-        session: this.session.formattedName_!,
-        seqno: this._seqno++,
-        requestOptions: this.configureTagOptions(
-          typeof transaction.singleUse !== 'undefined',
-          this.requestOptions?.transactionTag ?? undefined,
-          requestOptions
-        ),
-        directedReadOptions: directedReadOptions,
-        transaction,
-        params,
-        paramTypes,
-      });
-    };
-
-    const headers = this.resourceHeader_;
-    if (
-      this._getSpanner().routeToLeaderEnabled &&
-      (this._options.readWrite !== undefined ||
-        this._options.partitionedDml !== undefined)
-    ) {
-      addLeaderAwareRoutingHeader(headers);
-    }
-
-    const makeRequest = (resumeToken?: ResumeToken): Readable => {
-      if (!reqOpts || (this.id && !reqOpts.transaction.id)) {
-        try {
-          sanitizeRequest();
-        } catch (e) {
-          const errorStream = new PassThrough();
-          setImmediate(() => errorStream.destroy(e as Error));
-          return errorStream;
-        }
-      }
-
-      return this.requestStream({
-        client: 'SpannerClient',
-        method: 'executeStreamingSql',
-        reqOpts: Object.assign({}, reqOpts, {resumeToken}),
-        gaxOpts: gaxOptions,
-        headers: headers,
-      });
-    };
-
-    return partialResultStream(this._wrapWithIdWaiter(makeRequest), {
-      json,
-      jsonOptions,
-      maxResumeRetries,
-      columnsMetadata,
-      gaxOptions,
-    })
-      .on('response', response => {
-        if (response.metadata && response.metadata!.transaction && !this.id) {
-          this._update(response.metadata!.transaction);
-        }
-      })
-      .on('error', () => {
-        if (!this.id && this._useInRunner) {
-          this.begin();
-        }
-      });
+    );
   }
 
   /**
@@ -1733,108 +1774,131 @@ export class Transaction extends Dml {
     optionsOrCallback?: BatchUpdateOptions | CallOptions | BatchUpdateCallback,
     cb?: BatchUpdateCallback
   ): Promise<BatchUpdateResponse> | void {
-    const options =
-      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-    const callback =
-      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
-    const gaxOpts =
-      'gaxOptions' in options
-        ? (options as BatchUpdateOptions).gaxOptions
-        : options;
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.batchUpdate',
+      span => {
+        const options =
+          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+        const callback =
+          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+        const gaxOpts =
+          'gaxOptions' in options
+            ? (options as BatchUpdateOptions).gaxOptions
+            : options;
 
-    if (!Array.isArray(queries) || !queries.length) {
-      const rowCounts: number[] = [];
-      const error = new Error('batchUpdate requires at least 1 DML statement.');
-      const batchError: BatchUpdateError = Object.assign(error, {
-        code: 3, // invalid argument
-        rowCounts,
-      }) as BatchUpdateError;
-      callback!(batchError, rowCounts);
-      return;
-    }
-
-    const statements: spannerClient.spanner.v1.ExecuteBatchDmlRequest.IStatement[] =
-      queries.map(query => {
-        if (typeof query === 'string') {
-          return {sql: query};
-        }
-        const {sql} = query;
-        const {params, paramTypes} = Snapshot.encodeParams(query);
-        return {sql, params, paramTypes};
-      });
-
-    const transaction: spannerClient.spanner.v1.ITransactionSelector = {};
-    if (this.id) {
-      transaction.id = this.id as Uint8Array;
-    } else {
-      transaction.begin = this._options;
-    }
-    const reqOpts: spannerClient.spanner.v1.ExecuteBatchDmlRequest = {
-      session: this.session.formattedName_!,
-      requestOptions: this.configureTagOptions(
-        false,
-        this.requestOptions?.transactionTag ?? undefined,
-        (options as BatchUpdateOptions).requestOptions
-      ),
-      transaction,
-      seqno: this._seqno++,
-      statements,
-    } as spannerClient.spanner.v1.ExecuteBatchDmlRequest;
-
-    const headers = this.resourceHeader_;
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
-
-    this.request(
-      {
-        client: 'SpannerClient',
-        method: 'executeBatchDml',
-        reqOpts,
-        gaxOpts,
-        headers: headers,
-      },
-      (
-        err: null | grpc.ServiceError,
-        resp: spannerClient.spanner.v1.ExecuteBatchDmlResponse
-      ) => {
-        let batchUpdateError: BatchUpdateError;
-
-        if (err) {
+        if (!Array.isArray(queries) || !queries.length) {
           const rowCounts: number[] = [];
-          batchUpdateError = Object.assign(err, {rowCounts});
-          callback!(batchUpdateError, rowCounts, resp);
+          const error = new Error(
+            'batchUpdate requires at least 1 DML statement.'
+          );
+          const batchError: BatchUpdateError = Object.assign(error, {
+            code: 3, // invalid argument
+            rowCounts,
+          }) as BatchUpdateError;
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: batchError.toString(),
+          });
+          span.end();
+          callback!(batchError, rowCounts);
           return;
         }
 
-        const {resultSets, status} = resp;
-        for (const resultSet of resultSets) {
-          if (!this.id && resultSet.metadata?.transaction) {
-            this._update(resultSet.metadata.transaction);
+        const statements: spannerClient.spanner.v1.ExecuteBatchDmlRequest.IStatement[] =
+          queries.map(query => {
+            if (typeof query === 'string') {
+              return {sql: query};
+            }
+            const {sql} = query;
+            const {params, paramTypes} = Snapshot.encodeParams(query);
+            return {sql, params, paramTypes};
+          });
+
+        const transaction: spannerClient.spanner.v1.ITransactionSelector = {};
+        if (this.id) {
+          transaction.id = this.id as Uint8Array;
+        } else {
+          transaction.begin = this._options;
+        }
+        const reqOpts: spannerClient.spanner.v1.ExecuteBatchDmlRequest = {
+          session: this.session.formattedName_!,
+          requestOptions: this.configureTagOptions(
+            false,
+            this.requestOptions?.transactionTag ?? undefined,
+            (options as BatchUpdateOptions).requestOptions
+          ),
+          transaction,
+          seqno: this._seqno++,
+          statements,
+        } as spannerClient.spanner.v1.ExecuteBatchDmlRequest;
+
+        const headers = this.resourceHeader_;
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
+
+        this.request(
+          {
+            client: 'SpannerClient',
+            method: 'executeBatchDml',
+            reqOpts,
+            gaxOpts,
+            headers: headers,
+          },
+          (
+            err: null | grpc.ServiceError,
+            resp: spannerClient.spanner.v1.ExecuteBatchDmlResponse
+          ) => {
+            let batchUpdateError: BatchUpdateError;
+
+            if (err) {
+              const rowCounts: number[] = [];
+              batchUpdateError = Object.assign(err, {rowCounts});
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: batchUpdateError.toString(),
+              });
+              span.end();
+              callback!(batchUpdateError, rowCounts, resp);
+              return;
+            }
+
+            const {resultSets, status} = resp;
+            for (const resultSet of resultSets) {
+              if (!this.id && resultSet.metadata?.transaction) {
+                this._update(resultSet.metadata.transaction);
+              }
+            }
+            const rowCounts: number[] = resultSets.map(({stats}) => {
+              return (
+                (stats &&
+                  Number(
+                    stats[
+                      (stats as spannerClient.spanner.v1.ResultSetStats)
+                        .rowCount!
+                    ]
+                  )) ||
+                0
+              );
+            });
+
+            if (status && status.code !== 0) {
+              const error = new Error(status.message!);
+              batchUpdateError = Object.assign(error, {
+                code: status.code,
+                metadata: Transaction.extractKnownMetadata(status.details!),
+                rowCounts,
+              }) as BatchUpdateError;
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: batchUpdateError.toString(),
+              });
+            }
+
+            span.end();
+            callback!(batchUpdateError!, rowCounts, resp);
           }
-        }
-        const rowCounts: number[] = resultSets.map(({stats}) => {
-          return (
-            (stats &&
-              Number(
-                stats[
-                  (stats as spannerClient.spanner.v1.ResultSetStats).rowCount!
-                ]
-              )) ||
-            0
-          );
-        });
-
-        if (status && status.code !== 0) {
-          const error = new Error(status.message!);
-          batchUpdateError = Object.assign(error, {
-            code: status.code,
-            metadata: Transaction.extractKnownMetadata(status.details!),
-            rowCounts,
-          }) as BatchUpdateError;
-        }
-
-        callback!(batchUpdateError!, rowCounts, resp);
+        );
       }
     );
   }
@@ -1937,69 +2001,95 @@ export class Transaction extends Dml {
     optionsOrCallback?: CommitOptions | CallOptions | CommitCallback,
     cb?: CommitCallback
   ): void | Promise<CommitResponse> {
-    const options =
-      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-    const callback =
-      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
-    const gaxOpts =
-      'gaxOptions' in options ? (options as CommitOptions).gaxOptions : options;
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.commit',
+      span => {
+        const options =
+          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+        const callback =
+          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+        const gaxOpts =
+          'gaxOptions' in options
+            ? (options as CommitOptions).gaxOptions
+            : options;
 
-    const mutations = this._queuedMutations;
-    const session = this.session.formattedName_!;
-    const requestOptions = (options as CommitOptions).requestOptions;
-    const reqOpts: CommitRequest = {mutations, session, requestOptions};
+        const mutations = this._queuedMutations;
+        const session = this.session.formattedName_!;
+        const requestOptions = (options as CommitOptions).requestOptions;
+        const reqOpts: CommitRequest = {mutations, session, requestOptions};
 
-    if (this.id) {
-      reqOpts.transactionId = this.id as Uint8Array;
-    } else if (!this._useInRunner) {
-      reqOpts.singleUseTransaction = this._options;
-    } else {
-      this.begin().then(() => this.commit(options, callback), callback);
-      return;
-    }
-
-    if (
-      'returnCommitStats' in options &&
-      (options as CommitOptions).returnCommitStats
-    ) {
-      reqOpts.returnCommitStats = (options as CommitOptions).returnCommitStats;
-    }
-    if (
-      'maxCommitDelay' in options &&
-      (options as CommitOptions).maxCommitDelay
-    ) {
-      reqOpts.maxCommitDelay = (options as CommitOptions).maxCommitDelay;
-    }
-    reqOpts.requestOptions = Object.assign(
-      requestOptions || {},
-      this.requestOptions
-    );
-
-    const headers = this.resourceHeader_;
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
-
-    this.request(
-      {
-        client: 'SpannerClient',
-        method: 'commit',
-        reqOpts,
-        gaxOpts: gaxOpts,
-        headers: headers,
-      },
-      (err: null | Error, resp: spannerClient.spanner.v1.ICommitResponse) => {
-        this.end();
-
-        if (resp && resp.commitTimestamp) {
-          this.commitTimestampProto = resp.commitTimestamp;
-          this.commitTimestamp = new PreciseDate(
-            resp.commitTimestamp as DateStruct
-          );
+        if (this.id) {
+          reqOpts.transactionId = this.id as Uint8Array;
+        } else if (!this._useInRunner) {
+          reqOpts.singleUseTransaction = this._options;
+        } else {
+          this.begin().then(() => {
+            span.end();
+            this.commit(options, callback);
+          }, callback);
+          return;
         }
-        err = Transaction.decorateCommitError(err as ServiceError, mutations);
 
-        callback!(err as ServiceError | null, resp);
+        if (
+          'returnCommitStats' in options &&
+          (options as CommitOptions).returnCommitStats
+        ) {
+          reqOpts.returnCommitStats = (
+            options as CommitOptions
+          ).returnCommitStats;
+        }
+        if (
+          'maxCommitDelay' in options &&
+          (options as CommitOptions).maxCommitDelay
+        ) {
+          reqOpts.maxCommitDelay = (options as CommitOptions).maxCommitDelay;
+        }
+        reqOpts.requestOptions = Object.assign(
+          requestOptions || {},
+          this.requestOptions
+        );
+
+        const headers = this.resourceHeader_;
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
+
+        this.request(
+          {
+            client: 'SpannerClient',
+            method: 'commit',
+            reqOpts,
+            gaxOpts: gaxOpts,
+            headers: headers,
+          },
+          (
+            err: null | Error,
+            resp: spannerClient.spanner.v1.ICommitResponse
+          ) => {
+            this.end();
+
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+
+            if (resp && resp.commitTimestamp) {
+              this.commitTimestampProto = resp.commitTimestamp;
+              this.commitTimestamp = new PreciseDate(
+                resp.commitTimestamp as DateStruct
+              );
+            }
+            err = Transaction.decorateCommitError(
+              err as ServiceError,
+              mutations
+            );
+
+            span.end();
+            callback!(err as ServiceError | null, resp);
+          }
+        );
       }
     );
   }

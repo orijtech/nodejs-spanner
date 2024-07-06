@@ -17,10 +17,10 @@
 function exportSpans(instanceId, databaseId, projectId) {
   // [START spanner_export_traces]
   // Imports the Google Cloud client library and OpenTelemetry libraries for exporting traces.
-  const {Spanner} = require('@google-cloud/spanner');
-  // const {TraceExporter} = require('@google-cloud/opentelemetry-cloud-trace-exporter');
+  // [START setup_tracer]
   const {Resource} = require('@opentelemetry/resources');
   const {NodeSDK} = require('@opentelemetry/sdk-node');
+  const {trace} = require('@opentelemetry/api');
   const {
     NodeTracerProvider,
     TraceIdRatioBasedSampler,
@@ -28,15 +28,13 @@ function exportSpans(instanceId, databaseId, projectId) {
   const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
   const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
   const {registerInstrumentations} = require('@opentelemetry/instrumentation');
-  // const {startTraceExport} = require('@google-cloud/spanner');
+  const {
+    TraceExporter,
+  } = require('@google-cloud/opentelemetry-cloud-trace-exporter');
   const {
     SEMRESATTRS_SERVICE_NAME,
     SEMRESATTRS_SERVICE_VERSION,
   } = require('@opentelemetry/semantic-conventions');
-  const {
-    SimpleSpanProcessor,
-    ConsoleSpanExporter,
-  } = require('@opentelemetry/sdk-trace-base');
 
   const resource = Resource.default().merge(
     new Resource({
@@ -44,22 +42,29 @@ function exportSpans(instanceId, databaseId, projectId) {
       [SEMRESATTRS_SERVICE_VERSION]: 'v1.0.0', // Whatever version of your app is running.,
     })
   );
-  const exporter = new ConsoleSpanExporter();
+  const exporter = new TraceExporter();
+
   const sdk = new NodeSDK({
     resource: resource,
     traceExporter: exporter,
+    // Trace every single request to ensure that we generate
+    // enough traffic for proper examination of traces.
     sampler: new TraceIdRatioBasedSampler(1.0),
   });
   sdk.start();
 
-  // startTraceExport(exporter);
-  const provider = new NodeTracerProvider();
+  const provider = new NodeTracerProvider({resource: resource});
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
 
   registerInstrumentations({
     instrumentations: [new GrpcInstrumentation()],
   });
+
+  // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
+  const {Spanner} = require('@google-cloud/spanner');
+  const tracer = trace.getTracer('nodejs-spanner');
+  // [END setup_tracer]
 
   /**
    * TODO(developer): Uncomment the following lines before running the sample.
@@ -79,37 +84,39 @@ function exportSpans(instanceId, databaseId, projectId) {
 
   // Gets a transaction object that captures the database state
   // at a specific point in time
-  database.getSnapshot(async (err, transaction) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
-    const queryOne = 'SELECT * FROM Singers';
-
-    let i = 0;
-    for (i = 0; i < 100; i++) {
-      try {
-        // Read #1, using SQL
-        const [qOneRows] = await transaction.run(queryOne);
-
-        qOneRows.forEach(row => {
-          const json = row.toJSON();
-          console.log(
-            `Id: ${json.id}, Value: ${json.value}, BaseCurrency: ${json.base_curr}`
-          );
-        });
-        console.log('Successfully executed read-only transaction.');
-      } catch (err) {
-        console.error('ERROR:', err);
-      } finally {
-        transaction.end();
-        // Close the database when finished.
-        await database.close();
-        console.log('Completed');
+  tracer.startActiveSpan('gotSnapshot', span => {
+    database.getSnapshot(async (err, transaction) => {
+      if (err) {
+        console.error(err);
+        return;
       }
-    }
+      const queryOne =
+        "SELECT * FROM information_schema.tables WHERE table_schema = ''";
 
-    setTimeout(10000, () => console.log('ended'));
+      let i = 0;
+      for (i = 0; i < 1; i++) {
+        try {
+          // Read #1, using SQL
+          const [qOneRows] = await transaction.run(queryOne);
+
+          qOneRows.forEach(row => {
+            const json = JSON.stringify(row.toJSON());
+            console.log(`Catalog: ${json}`);
+          });
+          console.log('Successfully executed read-only transaction.');
+        } catch (err) {
+          console.error('ERROR:', err);
+        } finally {
+          transaction.end();
+          // Close the database when finished.
+          await database.close();
+          console.log('Completed');
+        }
+      }
+    });
+
+    span.end();
+    setTimeout(() => console.log('ended'), 30000);
   });
   // [END spanner_export_traces]
 }

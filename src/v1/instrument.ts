@@ -19,13 +19,18 @@ const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
 const {NodeTracerProvider} = require('@opentelemetry/sdk-trace-node');
 const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+const {
+  CallbackMethod,
+  Class,
+  CallbackifyAllOptions,
+} = require('@google-cloud/promisify');
 
+import {trace} from '@opentelemetry/api';
 // TODO: Infer the tracer from either the provided context or globally.
-const tracer = opentelemetry.trace.getTracer('nodejs-spanner', 'v1.0.0');
+const tracer = trace.getTracer('nodejs-spanner');
 const SPAN_CODE_ERROR = SpanStatusCode.ERROR;
 
 export {SPAN_CODE_ERROR, tracer};
-console.log('instrument');
 
 export function spanCode(span, err) {
   if (!err) {
@@ -50,5 +55,86 @@ export function startTraceExport(exporter) {
 
   registerInstrumentations({
     instrumentations: [new GrpcInstrumentation()],
+  });
+}
+
+/**
+ * Wraps a promisy type function to conditionally call a callback function.
+ *
+ * @param {function} originalMethod - The method to callbackify.
+ * @param {object=} options - Callback options.
+ * @param {boolean} options.singular - Pass to the callback a single arg instead of an array.
+ * @return {function} wrapped
+ */
+function callbackify(originalMethod: typeof CallbackMethod) {
+  if (originalMethod.callbackified_) {
+    return originalMethod;
+  }
+
+  // tslint:disable-next-line:no-any
+  const wrapper = function (this: any) {
+    if (typeof arguments[arguments.length - 1] !== 'function') {
+      return originalMethod.apply(this, arguments);
+    }
+
+    const cb = Array.prototype.pop.call(arguments);
+
+    console.log('cb.name', cb.name);
+
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/Spanner' + cb.name,
+      span => {
+        originalMethod.apply(this, arguments).then(
+          // tslint:disable-next-line:no-any
+          (res: any) => {
+            res = Array.isArray(res) ? res : [res];
+            span.end();
+            cb(null, ...res);
+          },
+          (err: Error) => {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            cb(err);
+          }
+        );
+      }
+    );
+  };
+  wrapper.callbackified_ = true;
+  return wrapper;
+}
+
+/**
+ * Callbackifies certain Class methods. This will not callbackify private or
+ * streaming methods.
+ *
+ * @param {module:common/service} Class - Service class.
+ * @param {object=} options - Configuration object.
+ */
+export function callbackifyAll(
+  // tslint:disable-next-line:variable-name
+  Class: Function,
+  options?: typeof CallbackifyAllOptions
+) {
+  const exclude = (options && options.exclude) || [];
+  const ownPropertyNames = Object.getOwnPropertyNames(Class.prototype);
+  const methods = ownPropertyNames.filter(methodName => {
+    // clang-format off
+    return (
+      !exclude.includes(methodName) &&
+      typeof Class.prototype[methodName] === 'function' && // is it a function?
+      !/^_|(Stream|_)|^constructor$/.test(methodName) // is it callbackifyable?
+    );
+    // clang-format on
+  });
+
+  methods.forEach(methodName => {
+    const originalMethod = Class.prototype[methodName];
+    if (!originalMethod.callbackified_) {
+      Class.prototype[methodName] = callbackify(originalMethod);
+    }
   });
 }

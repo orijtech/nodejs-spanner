@@ -23,7 +23,7 @@ import {
 } from '@google-cloud/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const common = require('./common-grpc/service-object');
-import {promisify, promisifyAll, callbackifyAll} from '@google-cloud/promisify';
+import {promisify, promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import * as r from 'teeny-request';
 import * as streamEvents from 'stream-events';
@@ -102,7 +102,7 @@ import Policy = google.iam.v1.Policy;
 import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
-import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
+import {tracer, SPAN_CODE_ERROR, callbackifyAll} from './v1/instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
   IDatabaseRole,
@@ -536,39 +536,31 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | SetDatabaseMetadataCallback,
     cb?: SetDatabaseMetadataCallback
   ): void | Promise<SetDatabaseMetadataResponse> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.setMetadata',
-      span => {
-        const gaxOpts =
-          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    const gaxOpts =
+      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-        const reqOpts = {
-          database: extend(
-            {
-              name: this.formattedName_,
-            },
-            metadata
-          ),
-          updateMask: {
-            paths: Object.keys(metadata).map(snakeCase),
-          },
-        };
-        return this.request(
-          {
-            client: 'DatabaseAdminClient',
-            method: 'updateDatabase',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          data => {
-            span.end();
-            callback!(data);
-          }
-        );
-      }
+    const reqOpts = {
+      database: extend(
+        {
+          name: this.formattedName_,
+        },
+        metadata
+      ),
+      updateMask: {
+        paths: Object.keys(metadata).map(snakeCase),
+      },
+    };
+    return this.request(
+      {
+        client: 'DatabaseAdminClient',
+        method: 'updateDatabase',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      callback
     );
   }
 
@@ -793,24 +785,10 @@ class Database extends common.GrpcServiceObject {
   close(
     callback?: SessionPoolCloseCallback
   ): void | Promise<DatabaseCloseResponse> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.close',
-      span => {
-        const key = this.id!.split('/').pop();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (this.parent as any).databases_.delete(key);
-        this.pool_.close(err => {
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
-          }
-          span.end();
-          callback!(err);
-        });
-      }
-    );
+    const key = this.id!.split('/').pop();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.parent as any).databases_.delete(key);
+    this.pool_.close(callback!);
   }
   /**
    * @typedef {array} CreateTransactionResponse
@@ -2048,40 +2026,59 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | GetSnapshotCallback,
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
-    const callback =
-      typeof optionsOrCallback === 'function'
-        ? (optionsOrCallback as GetSnapshotCallback)
-        : cb;
-    const options =
-      typeof optionsOrCallback === 'object'
-        ? (optionsOrCallback as TimestampBounds)
-        : {};
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Database.getSnapshot',
+      span => {
+        console.log(`span: ${span}`);
+        const callback =
+          typeof optionsOrCallback === 'function'
+            ? (optionsOrCallback as GetSnapshotCallback)
+            : cb;
+        const options =
+          typeof optionsOrCallback === 'object'
+            ? (optionsOrCallback as TimestampBounds)
+            : {};
 
-    this.pool_.getSession((err, session) => {
-      if (err) {
-        callback!(err as ServiceError);
-        return;
-      }
-
-      const snapshot = session!.snapshot(options, this.queryOptions_);
-
-      snapshot.begin(err => {
-        if (err) {
-          if (isSessionNotFoundError(err)) {
-            session!.lastError = err;
-            this.pool_.release(session!);
-            this.getSnapshot(options, callback!);
-          } else {
-            this.pool_.release(session!);
-            callback!(err);
+        this.pool_.getSession((err, session) => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            callback!(err as ServiceError);
+            return;
           }
-          return;
-        }
 
-        this._releaseOnEnd(session!, snapshot);
-        callback!(err, snapshot);
-      });
-    });
+          const snapshot = session!.snapshot(options, this.queryOptions_);
+
+          snapshot.begin(err => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              if (isSessionNotFoundError(err)) {
+                session!.lastError = err;
+                this.pool_.release(session!);
+                this.getSnapshot(options, callback!);
+                span.end();
+              } else {
+                this.pool_.release(session!);
+                span.end();
+                callback!(err);
+              }
+              return;
+            }
+
+            this._releaseOnEnd(session!, snapshot);
+            span.end();
+            console.log('span ended');
+            callback!(err, snapshot);
+          });
+        });
+      }
+    );
   }
   /**
    * @typedef {array} GetTransactionResponse
@@ -3127,14 +3124,14 @@ class Database extends common.GrpcServiceObject {
           }
 
           if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
-            this.runTransaction(options, runFn!);
             span.end();
+            this.runTransaction(options, runFn!);
             return;
           }
 
           if (err) {
-            runFn!(err as grpc.ServiceError);
             span.end();
+            runFn!(err as grpc.ServiceError);
             return;
           }
           if (options.optimisticLock) {
@@ -3154,13 +3151,13 @@ class Database extends common.GrpcServiceObject {
 
           runner.run().then(release, err => {
             if (isSessionNotFoundError(err)) {
+              span.end();
               release();
               this.runTransaction(options, runFn!);
-              span.end();
             } else {
+              span.end();
               setImmediate(runFn!, err);
               release();
-              span.end();
             }
           });
         });

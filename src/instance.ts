@@ -877,7 +877,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CreateDatabaseOptions | CreateDatabaseCallback,
     cb?: CreateDatabaseCallback
   ): void | Promise<CreateDatabaseResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Instance.createDatabase',
       span => {
         if (!name) {

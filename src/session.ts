@@ -323,38 +323,23 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | DeleteSessionCallback,
     cb?: DeleteSessionCallback
   ): void | Promise<DeleteSessionResponse> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/Session.delete',
-      span => {
-        const gaxOpts =
-          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    const gaxOpts =
+      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-        const reqOpts = {
-          name: this.formattedName_,
-        };
-        return this.request(
-          {
-            client: 'SpannerClient',
-            method: 'deleteSession',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          (err, resp) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-
-            span.end();
-            callback!(err, resp);
-          }
-        );
-      }
+    const reqOpts = {
+      name: this.formattedName_,
+    };
+    return this.request(
+      {
+        client: 'SpannerClient',
+        method: 'deleteSession',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      callback!
     );
   }
   /**
