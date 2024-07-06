@@ -21,7 +21,10 @@ function exportSpans(instanceId, databaseId, projectId) {
   // const {TraceExporter} = require('@google-cloud/opentelemetry-cloud-trace-exporter');
   const {Resource} = require('@opentelemetry/resources');
   const {NodeSDK} = require('@opentelemetry/sdk-node');
-  const {NodeTracerProvider, TraceIdRatioBasedSampler} = require('@opentelemetry/sdk-trace-node');
+  const {
+    NodeTracerProvider,
+    TraceIdRatioBasedSampler,
+  } = require('@opentelemetry/sdk-trace-node');
   const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
   const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
   const {registerInstrumentations} = require('@opentelemetry/instrumentation');
@@ -81,8 +84,7 @@ function exportSpans(instanceId, databaseId, projectId) {
       console.error(err);
       return;
     }
-    const queryOne =
-      'SELECT * FROM Singers';
+    const queryOne = 'SELECT * FROM Singers';
 
     let i = 0;
     for (i = 0; i < 100; i++) {
@@ -103,9 +105,11 @@ function exportSpans(instanceId, databaseId, projectId) {
         transaction.end();
         // Close the database when finished.
         await database.close();
-        console.log("Completed");
+        console.log('Completed');
       }
     }
+
+    setTimeout(10000, () => console.log('ended'));
   });
   // [END spanner_export_traces]
 }

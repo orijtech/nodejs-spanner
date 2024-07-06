@@ -536,7 +536,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | SetDatabaseMetadataCallback,
     cb?: SetDatabaseMetadataCallback
   ): void | Promise<SetDatabaseMetadataResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Database.setMetadata',
       span => {
         const gaxOpts =
@@ -658,7 +658,7 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
       span => {
         if (typeof options === 'number') {
@@ -793,7 +793,7 @@ class Database extends common.GrpcServiceObject {
   close(
     callback?: SessionPoolCloseCallback
   ): void | Promise<DatabaseCloseResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Database.close',
       span => {
         const key = this.id!.split('/').pop();

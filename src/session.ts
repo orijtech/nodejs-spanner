@@ -237,7 +237,7 @@ export class Session extends common.GrpcServiceObject {
         optionsOrCallback: CreateSessionOptions | CreateSessionCallback,
         callback: CreateSessionCallback
       ) => {
-        tracer.startActiveSpan(
+        return tracer.startActiveSpan(
           'cloud.google.com/nodejs/Session.create',
           span => {
             const options =
@@ -323,36 +323,39 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | DeleteSessionCallback,
     cb?: DeleteSessionCallback
   ): void | Promise<DeleteSessionResponse> {
-    tracer.startActiveSpan('cloud.google.com/nodejs/Session.delete', span => {
-      const gaxOpts =
-        typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-      const callback =
-        typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/Session.delete',
+      span => {
+        const gaxOpts =
+          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+        const callback =
+          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-      const reqOpts = {
-        name: this.formattedName_,
-      };
-      return this.request(
-        {
-          client: 'SpannerClient',
-          method: 'deleteSession',
-          reqOpts,
-          gaxOpts,
-          headers: this.resourceHeader_,
-        },
-        (err, resp) => {
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
+        const reqOpts = {
+          name: this.formattedName_,
+        };
+        return this.request(
+          {
+            client: 'SpannerClient',
+            method: 'deleteSession',
+            reqOpts,
+            gaxOpts,
+            headers: this.resourceHeader_,
+          },
+          (err, resp) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+
+            span.end();
+            callback!(err, resp);
           }
-
-          span.end();
-          callback!(err, resp);
-        }
-      );
-    });
+        );
+      }
+    );
   }
   /**
    * @typedef {array} GetSessionMetadataResponse
@@ -402,7 +405,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | GetSessionMetadataCallback,
     cb?: GetSessionMetadataCallback
   ): void | Promise<GetSessionMetadataResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/Session.getMetadata',
       span => {
         const gaxOpts =
@@ -471,7 +474,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | KeepAliveCallback,
     cb?: KeepAliveCallback
   ): void | Promise<KeepAliveResponse> {
-    tracer.startActiveSpan(
+    return tracer.startActiveSpan(
       'cloud.google.com/nodejs/Session.keepAlive',
       span => {
         const gaxOpts =
