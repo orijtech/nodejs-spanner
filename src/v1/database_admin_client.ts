@@ -489,9 +489,35 @@ export class DatabaseAdminClient {
                   return Promise.reject(msg);
                 }
                 const func = stub[methodName];
-                const result = func.apply(stub, args);
-                span.end();
-                return result;
+                const call = func.apply(stub, args);
+
+                // TODO: Add a custom interface implementation check.
+                // Retrieve all the already set 'end' event listeners and
+                // add our span.end() invocation as the last one.
+                const priorEndListeners = call.listeners('end');
+                call.on('end', () => {
+                  priorEndListeners.forEach(fn => {
+                    fn();
+                  });
+                  span.end();
+                });
+
+                // Override the 'error' event listeners and then
+                // set our span.setError for the call.
+                const priorErrListeners = call.listeners('error');
+                call.on('error', err => {
+                  priorErrListeners.forEach(fn => {
+                    fn(err);
+                  });
+
+                  span.setStatus({
+                    code: SPAN_CODE_ERROR,
+                    message: err.toString(),
+                  });
+                  span.end();
+                });
+
+                return call;
               }
             );
           },
