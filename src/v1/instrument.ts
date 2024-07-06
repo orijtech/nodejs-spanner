@@ -18,6 +18,7 @@ import opentelemetry, {SpanStatusCode} from '@opentelemetry/api';
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
 const {NodeTracerProvider} = require('@opentelemetry/sdk-trace-node');
+const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
 const {registerInstrumentations} = require('@opentelemetry/instrumentation');
 const {
   CallbackMethod,
@@ -54,7 +55,7 @@ export function startTraceExport(exporter) {
   provider.register();
 
   registerInstrumentations({
-    instrumentations: [new GrpcInstrumentation()],
+    instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
   });
 }
 

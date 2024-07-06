@@ -26,7 +26,7 @@ import type {
   PaginationCallback,
   GaxCall,
 } from 'google-gax';
-import {Transform, PassThrough} from 'stream';
+import {Transform, PassThrough, finished} from 'stream';
 import * as protos from '../../protos/protos';
 import jsonProtos = require('../../protos/protos.json');
 
@@ -343,6 +343,16 @@ export class SpannerClient {
                     stream.emit('error', new this._gaxModule.GoogleError(msg));
                     span.end();
                   });
+
+                  finished(stream, err => {
+                    if (err) {
+                      span.setStatus({
+                        code: SPAN_CODE_ERROR,
+                        message: err.toString(),
+                      });
+                    }
+                    span.end();
+                  });
                   return stream;
                 }
 
@@ -352,9 +362,35 @@ export class SpannerClient {
 
               // In this path, the client hasn't yet been terminated.
               const func = stub[methodName];
-              const results = func.apply(stub, args);
-              span.end();
-              return results;
+              const call = func.apply(stub, args);
+
+              // TODO: Add a custom interface implementation check.
+              // Retrieve all the already set 'end' event listeners and
+              // add our span.end() invocation as the last one.
+              const priorEndListeners = call.listeners('end');
+              call.on('end', () => {
+                priorEndListeners.forEach(fn => {
+                  fn();
+                });
+                span.end();
+              });
+
+              // Override the 'error' event listeners and then
+              // set our span.setError for the call.
+              const priorErrListeners = call.listeners('error');
+              call.on('error', err => {
+                priorErrListeners.forEach(fn => {
+                  fn(err);
+                });
+
+                span.setStatus({
+                  code: SPAN_CODE_ERROR,
+                  message: err.toString(),
+                });
+                span.end();
+              });
+
+              return call;
             });
           },
         (err: Error | null | undefined) => () => {

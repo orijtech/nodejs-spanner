@@ -402,53 +402,66 @@ export class Snapshot extends EventEmitter {
     gaxOptionsOrCallback?: CallOptions | BeginTransactionCallback,
     cb?: BeginTransactionCallback
   ): void | Promise<BeginResponse> {
-    const gaxOpts =
-      typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
-    const callback =
-      typeof gaxOptionsOrCallback === 'function' ? gaxOptionsOrCallback : cb!;
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.begin',
+      span => {
+        const gaxOpts =
+          typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
+        const callback =
+          typeof gaxOptionsOrCallback === 'function'
+            ? gaxOptionsOrCallback
+            : cb!;
 
-    const session = this.session.formattedName_!;
-    const options = this._options;
-    const reqOpts: spannerClient.spanner.v1.IBeginTransactionRequest = {
-      session,
-      options,
-    };
+        const session = this.session.formattedName_!;
+        const options = this._options;
+        const reqOpts: spannerClient.spanner.v1.IBeginTransactionRequest = {
+          session,
+          options,
+        };
 
-    // Only hand crafted read-write transactions will be able to set a
-    // transaction tag for the BeginTransaction RPC. Also, this.requestOptions
-    // is only set in the constructor of Transaction, which is the constructor
-    // for read/write transactions.
-    if (this.requestOptions) {
-      reqOpts.requestOptions = this.requestOptions;
-    }
-
-    const headers = this.resourceHeader_;
-    if (
-      this._getSpanner().routeToLeaderEnabled &&
-      (this._options.readWrite !== undefined ||
-        this._options.partitionedDml !== undefined)
-    ) {
-      addLeaderAwareRoutingHeader(headers);
-    }
-
-    this.request(
-      {
-        client: 'SpannerClient',
-        method: 'beginTransaction',
-        reqOpts,
-        gaxOpts,
-        headers: headers,
-      },
-      (
-        err: null | grpc.ServiceError,
-        resp: spannerClient.spanner.v1.ITransaction
-      ) => {
-        if (err) {
-          callback!(err, resp);
-          return;
+        // Only hand crafted read-write transactions will be able to set a
+        // transaction tag for the BeginTransaction RPC. Also, this.requestOptions
+        // is only set in the constructor of Transaction, which is the constructor
+        // for read/write transactions.
+        if (this.requestOptions) {
+          reqOpts.requestOptions = this.requestOptions;
         }
-        this._update(resp);
-        callback!(null, resp);
+
+        const headers = this.resourceHeader_;
+        if (
+          this._getSpanner().routeToLeaderEnabled &&
+          (this._options.readWrite !== undefined ||
+            this._options.partitionedDml !== undefined)
+        ) {
+          addLeaderAwareRoutingHeader(headers);
+        }
+
+        this.request(
+          {
+            client: 'SpannerClient',
+            method: 'beginTransaction',
+            reqOpts,
+            gaxOpts,
+            headers: headers,
+          },
+          (
+            err: null | grpc.ServiceError,
+            resp: spannerClient.spanner.v1.ITransaction
+          ) => {
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              span.end();
+              callback!(err, resp);
+              return;
+            }
+            this._update(resp);
+            span.end();
+            callback!(null, resp);
+          }
+        );
       }
     );
   }
@@ -2377,43 +2390,61 @@ export class Transaction extends Dml {
       | spannerClient.spanner.v1.Spanner.RollbackCallback,
     cb?: spannerClient.spanner.v1.Spanner.RollbackCallback
   ): void | Promise<void> {
-    const gaxOpts =
-      typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
-    const callback =
-      typeof gaxOptionsOrCallback === 'function' ? gaxOptionsOrCallback : cb!;
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.rollback',
+      span => {
+        const gaxOpts =
+          typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
+        const callback =
+          typeof gaxOptionsOrCallback === 'function'
+            ? gaxOptionsOrCallback
+            : cb!;
 
-    if (!this.id) {
-      callback!(
-        new Error(
-          'Transaction ID is unknown, nothing to rollback.'
-        ) as ServiceError
-      );
-      return;
-    }
+        if (!this.id) {
+          const err = new Error(
+            'Transaction ID is unknown, nothing to rollback.'
+          ) as ServiceError;
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+          span.end();
+          callback!(err);
+          return;
+        }
 
-    const session = this.session.formattedName_!;
-    const transactionId = this.id;
-    const reqOpts: spannerClient.spanner.v1.IRollbackRequest = {
-      session,
-      transactionId,
-    };
+        const session = this.session.formattedName_!;
+        const transactionId = this.id;
+        const reqOpts: spannerClient.spanner.v1.IRollbackRequest = {
+          session,
+          transactionId,
+        };
 
-    const headers = this.resourceHeader_;
-    if (this._getSpanner().routeToLeaderEnabled) {
-      addLeaderAwareRoutingHeader(headers);
-    }
+        const headers = this.resourceHeader_;
+        if (this._getSpanner().routeToLeaderEnabled) {
+          addLeaderAwareRoutingHeader(headers);
+        }
 
-    this.request(
-      {
-        client: 'SpannerClient',
-        method: 'rollback',
-        reqOpts,
-        gaxOpts,
-        headers: headers,
-      },
-      (err: null | ServiceError) => {
-        this.end();
-        callback!(err);
+        this.request(
+          {
+            client: 'SpannerClient',
+            method: 'rollback',
+            reqOpts,
+            gaxOpts,
+            headers: headers,
+          },
+          (err: null | ServiceError) => {
+            this.end();
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+            span.end();
+            callback!(err);
+          }
+        );
       }
     );
   }
