@@ -31,9 +31,6 @@ function exportSpans(instanceId, databaseId, projectId) {
   const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
   const {registerInstrumentations} = require('@opentelemetry/instrumentation');
   const {
-    TraceExporter,
-  } = require('@google-cloud/opentelemetry-cloud-trace-exporter');
-  const {
     SEMRESATTRS_SERVICE_NAME,
     SEMRESATTRS_SERVICE_VERSION,
   } = require('@opentelemetry/semantic-conventions');
@@ -86,14 +83,16 @@ function exportSpans(instanceId, databaseId, projectId) {
   // Gets a reference to a Cloud Spanner instance and database
   const instance = spanner.instance(instanceId);
   const database = instance.database(databaseId);
-  const databaseAdminClient = spanner.getDatabaseAdminClient();
+  // const databaseAdminClient = spanner.getDatabaseAdminClient();
 
-  runMutations(tracer, database);
+  insertUsingDml(tracer, database);
   // [END spanner_export_traces]
 }
 
-function createDropIndices(databaseAdminClient, database) {
-  async function createIndex(callback) {
+function quickstart() {}
+
+function createDropIndices(tracer, databaseAdminClient, database) {
+  async function createIndex(tracer, callback) {
     const span = tracer.startSpan('createIndex');
     const request = ['CREATE INDEX AlbumsByAlbumTitle ON Albums(AlbumTitle)'];
 
@@ -122,7 +121,7 @@ function createDropIndices(databaseAdminClient, database) {
     }
   }
 
-  async function dropIndex(callback) {
+  async function dropIndex(tracer, databaseAdminClient, callback) {
     const span = tracer.startSpan('dropIndex');
     const request = ['DROP INDEX AlbumsByAlbumTitle'];
 
@@ -139,12 +138,11 @@ function createDropIndices(databaseAdminClient, database) {
 
       console.log('Waiting for operation to complete...');
       await operation.promise();
-      spanner.close();
       span.end();
       console.log('Added the AlbumsByAlbumTitle index.');
     } catch (err) {
       console.error('ERROR:', err);
-      createIndex(() => {});
+      createIndex(tracer, () => {});
     } finally {
       setTimeout(() => {
         callback();
@@ -155,7 +153,7 @@ function createDropIndices(databaseAdminClient, database) {
   // Gets a transaction object that captures the database state
   // at a specific point in time
   tracer.startActiveSpan('runOperations', span => {
-    createIndex(() => {
+    createIndex(tracer, () => {
       setTimeout(() => {
         span.end();
       }, 10000);
@@ -240,6 +238,44 @@ function runMutations(tracer, database) {
         span.end();
       }, 8000);
     }
+  });
+}
+
+function insertUsingDml(tracer, database) {
+  tracer.startActiveSpan('insertUsingDML', span => {
+    database.runTransaction(async (err, transaction) => {
+      if (err) {
+        span.end();
+        console.error(err);
+        return;
+      }
+      try {
+        await transaction.runUpdate({
+          sql: 'DELETE FROM Singers WHERE 1=1',
+        });
+
+        const [rowCount] = await transaction.runUpdate({
+          sql: 'INSERT Singers (SingerId, FirstName, LastName) VALUES (10, @firstName, @lastName)',
+          params: {
+            firstName: 'Virginia',
+            lastName: 'Watson',
+          },
+        });
+
+        console.log(
+          `Successfully inserted ${rowCount} record into the Singers table.`
+        );
+
+        await transaction.commit();
+      } catch (err) {
+        console.error('ERROR:', err);
+      } finally {
+        // Close the database when finished.
+        database.close();
+        span.end();
+        setTimeout(() => {}, 10000);
+      }
+    });
   });
 }
 
