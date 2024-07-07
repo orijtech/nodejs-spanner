@@ -14,6 +14,8 @@
 
 'use strict';
 
+const {Spanner, MutationGroup} = require('@google-cloud/spanner');
+
 function exportSpans(instanceId, databaseId, projectId) {
   // [START spanner_export_traces]
   // Imports the Google Cloud client library and OpenTelemetry libraries for exporting traces.
@@ -42,7 +44,10 @@ function exportSpans(instanceId, databaseId, projectId) {
       [SEMRESATTRS_SERVICE_VERSION]: 'v1.0.0', // Whatever version of your app is running.,
     })
   );
-  const exporter = new TraceExporter();
+
+  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
+  const options = {serviceName: 'nodejs-spanner'};
+  const exporter = new ZipkinExporter(options);
 
   const sdk = new NodeSDK({
     resource: resource,
@@ -53,16 +58,16 @@ function exportSpans(instanceId, databaseId, projectId) {
   });
   sdk.start();
 
+  const {OTTracePropagator} = require('@opentelemetry/propagator-ot-trace');
   const provider = new NodeTracerProvider({resource: resource});
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  provider.register();
+  provider.register({propagator: new OTTracePropagator()});
 
   registerInstrumentations({
     instrumentations: [new GrpcInstrumentation()],
   });
 
   // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
-  const {Spanner} = require('@google-cloud/spanner');
   const tracer = trace.getTracer('nodejs-spanner');
   // [END setup_tracer]
 
@@ -81,44 +86,161 @@ function exportSpans(instanceId, databaseId, projectId) {
   // Gets a reference to a Cloud Spanner instance and database
   const instance = spanner.instance(instanceId);
   const database = instance.database(databaseId);
+  const databaseAdminClient = spanner.getDatabaseAdminClient();
+
+  runMutations(tracer, database);
+  // [END spanner_export_traces]
+}
+
+function createDropIndices(databaseAdminClient, database) {
+  async function createIndex(callback) {
+    const span = tracer.startSpan('createIndex');
+    const request = ['CREATE INDEX AlbumsByAlbumTitle ON Albums(AlbumTitle)'];
+
+    // Creates a new index in the database
+    try {
+      const [operation] = await databaseAdminClient.updateDatabaseDdl({
+        database: databaseAdminClient.databasePath(
+          projectId,
+          instanceId,
+          databaseId
+        ),
+        statements: request,
+      });
+
+      console.log('Waiting for operation to complete...');
+      await operation.promise();
+
+      console.log('Added the AlbumsByAlbumTitle index.');
+      spanner.close();
+      span.end();
+    } catch (err) {
+      console.error('ERROR:', err);
+      dropIndex(() => {});
+    } finally {
+      span.end();
+    }
+  }
+
+  async function dropIndex(callback) {
+    const span = tracer.startSpan('dropIndex');
+    const request = ['DROP INDEX AlbumsByAlbumTitle'];
+
+    // Creates a new index in the database
+    try {
+      const [operation] = await databaseAdminClient.updateDatabaseDdl({
+        database: databaseAdminClient.databasePath(
+          projectId,
+          instanceId,
+          databaseId
+        ),
+        statements: request,
+      });
+
+      console.log('Waiting for operation to complete...');
+      await operation.promise();
+      spanner.close();
+      span.end();
+      console.log('Added the AlbumsByAlbumTitle index.');
+    } catch (err) {
+      console.error('ERROR:', err);
+      createIndex(() => {});
+    } finally {
+      setTimeout(() => {
+        callback();
+      }, 5000);
+    }
+  }
 
   // Gets a transaction object that captures the database state
   // at a specific point in time
-  tracer.startActiveSpan('gotSnapshot', span => {
-    database.getSnapshot(async (err, transaction) => {
-      if (err) {
-        console.error(err);
-        return;
-      }
-      const queryOne =
-        "SELECT * FROM information_schema.tables WHERE table_schema = ''";
+  tracer.startActiveSpan('runOperations', span => {
+    createIndex(() => {
+      setTimeout(() => {
+        span.end();
+      }, 10000);
+    });
+  });
+}
 
-      let i = 0;
-      for (i = 0; i < 1; i++) {
-        try {
-          // Read #1, using SQL
-          const [qOneRows] = await transaction.run(queryOne);
-
-          qOneRows.forEach(row => {
-            const json = JSON.stringify(row.toJSON());
-            console.log(`Catalog: ${json}`);
-          });
-          console.log('Successfully executed read-only transaction.');
-        } catch (err) {
-          console.error('ERROR:', err);
-        } finally {
-          transaction.end();
-          // Close the database when finished.
-          await database.close();
-          console.log('Completed');
-        }
-      }
+function runMutations(tracer, database) {
+  // Create Mutation Groups
+  /**
+   * Related mutations should be placed in a group, such as insert mutations for both a parent and a child row.
+   * A group must contain related mutations.
+   * Please see {@link https://cloud.google.com/spanner/docs/reference/rpc/google.spanner.v1#google.spanner.v1.BatchWriteRequest.MutationGroup}
+   * for more details and examples.
+   */
+  tracer.startActiveSpan('runMutations', span => {
+    const mutationGroup1 = new MutationGroup();
+    mutationGroup1.insert('Singers', {
+      SingerId: 1,
+      FirstName: 'Scarlet',
+      LastName: 'Terry',
     });
 
-    span.end();
-    setTimeout(() => console.log('ended'), 30000);
+    const mutationGroup2 = new MutationGroup();
+    mutationGroup2.insert('Singers', {
+      SingerId: 2,
+      FirstName: 'Marc',
+    });
+    mutationGroup2.insert('Singers', {
+      SingerId: 3,
+      FirstName: 'Catalina',
+      LastName: 'Smith',
+    });
+    mutationGroup2.insert('Albums', {
+      AlbumId: 1,
+      SingerId: 2,
+      AlbumTitle: 'Total Junk',
+    });
+    mutationGroup2.insert('Albums', {
+      AlbumId: 2,
+      SingerId: 3,
+      AlbumTitle: 'Go, Go, Go',
+    });
+
+    const options = {
+      transactionTag: 'batch-write-tag',
+    };
+
+    try {
+      database
+        .batchWriteAtLeastOnce([mutationGroup1, mutationGroup2], options)
+        .on('error', console.error)
+        .on('data', response => {
+          // Check the response code of each response to determine whether the mutation group(s) were applied successfully.
+          if (response.status.code === 0) {
+            console.log(
+              `Mutation group indexes ${
+                response.indexes
+              }, have been applied with commit timestamp ${Spanner.timestamp(
+                response.commitTimestamp
+              ).toJSON()}`
+            );
+          }
+          // Mutation groups that fail to commit trigger a response with a non-zero status code.
+          else {
+            console.log(
+              `Mutation group indexes ${response.indexes}, could not be applied with error code ${response.status.code}, and error message ${response.status.message}`
+            );
+          }
+        })
+        .on('end', () => {
+          console.log('Request completed successfully');
+          database.close();
+          span.end();
+        });
+    } catch (err) {
+      console.log(err);
+      span.end();
+    } finally {
+      setTimeout(() => {
+        database.close();
+        span.end();
+      }, 8000);
+    }
   });
-  // [END spanner_export_traces]
 }
 
 require('yargs')

@@ -560,7 +560,7 @@ class Database extends common.GrpcServiceObject {
         gaxOpts,
         headers: this.resourceHeader_,
       },
-      callback
+      callback!
     );
   }
 
