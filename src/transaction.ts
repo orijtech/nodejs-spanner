@@ -1567,24 +1567,37 @@ export class Dml extends Snapshot {
     query: string | ExecuteSqlRequest,
     callback?: RunUpdateCallback
   ): void | Promise<RunUpdateResponse> {
-    if (typeof query === 'string') {
-      query = {sql: query} as ExecuteSqlRequest;
-    }
-
-    this.run(
-      query,
-      (
-        err: null | grpc.ServiceError,
-        rows: Rows,
-        stats: spannerClient.spanner.v1.ResultSetStats
-      ) => {
-        let rowCount = 0;
-
-        if (stats && stats.rowCount) {
-          rowCount = Math.floor(stats[stats.rowCount] as number);
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.runUpdate',
+      span => {
+        if (typeof query === 'string') {
+          query = {sql: query} as ExecuteSqlRequest;
         }
 
-        callback!(err, rowCount);
+        this.run(
+          query,
+          (
+            err: null | grpc.ServiceError,
+            rows: Rows,
+            stats: spannerClient.spanner.v1.ResultSetStats
+          ) => {
+            let rowCount = 0;
+
+            if (stats && stats.rowCount) {
+              rowCount = Math.floor(stats[stats.rowCount] as number);
+            }
+
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+
+            span.end();
+            callback!(err, rowCount);
+          }
+        );
       }
     );
   }
