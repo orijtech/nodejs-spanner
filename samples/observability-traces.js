@@ -250,9 +250,11 @@ function insertUsingDml(tracer, database) {
         return;
       }
       try {
-        await transaction.runUpdate({
+        const [delCount] = await transaction.runUpdate({
           sql: 'DELETE FROM Singers WHERE 1=1',
         });
+
+        console.log(`Deletion count ${delCount}`);
 
         const [rowCount] = await transaction.runUpdate({
           sql: 'INSERT Singers (SingerId, FirstName, LastName) VALUES (10, @firstName, @lastName)',
@@ -267,13 +269,12 @@ function insertUsingDml(tracer, database) {
         );
 
         await transaction.commit();
+        span.end();
       } catch (err) {
         console.error('ERROR:', err);
       } finally {
         // Close the database when finished.
-        database.close();
-        span.end();
-        setTimeout(() => {}, 10000);
+        setTimeout(() => {}, 8000);
       }
     });
   });

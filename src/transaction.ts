@@ -912,23 +912,37 @@ export class Snapshot extends EventEmitter {
     requestOrCallback: ReadRequest | ReadCallback,
     cb?: ReadCallback
   ): void | Promise<ReadResponse> {
-    const rows: Rows = [];
+    return tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Transaction.read',
+      span => {
+        const rows: Rows = [];
 
-    let request: ReadRequest;
-    let callback: ReadCallback;
+        let request: ReadRequest;
+        let callback: ReadCallback;
 
-    if (typeof requestOrCallback === 'function') {
-      request = {} as RequestOptions;
-      callback = requestOrCallback as ReadCallback;
-    } else {
-      request = requestOrCallback as RequestOptions;
-      callback = cb as ReadCallback;
-    }
+        if (typeof requestOrCallback === 'function') {
+          request = {} as RequestOptions;
+          callback = requestOrCallback as ReadCallback;
+        } else {
+          request = requestOrCallback as RequestOptions;
+          callback = cb as ReadCallback;
+        }
 
-    this.createReadStream(table, request)
-      .on('error', callback!)
-      .on('data', row => rows.push(row))
-      .on('end', () => callback!(null, rows));
+        this.createReadStream(table, request)
+          .on('error', err => {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            callback!;
+          })
+          .on('data', row => rows.push(row))
+          .on('end', () => {
+            span.end();
+            callback!(null, rows);
+          });
+      }
+    );
   }
 
   /**
@@ -1014,7 +1028,6 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
-    console.log('Transaction.run');
     return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Transaction.run',
       span => {
@@ -1024,7 +1037,6 @@ export class Snapshot extends EventEmitter {
 
         this.runStream(query)
           .on('error', (err, rows, stats, metadata) => {
-            console.log('event.err');
             span.setStatus({
               code: SPAN_CODE_ERROR,
               message: err.toString(),
@@ -1033,7 +1045,6 @@ export class Snapshot extends EventEmitter {
             callback!(err, rows, stats, metadata);
           })
           .on('response', response => {
-            console.log('event.response');
             if (response.metadata) {
               metadata = response.metadata;
               if (metadata.transaction && !this.id) {
@@ -1044,7 +1055,6 @@ export class Snapshot extends EventEmitter {
           .on('data', row => rows.push(row))
           .on('stats', _stats => (stats = _stats))
           .on('end', () => {
-            console.log('event.end');
             span.end();
             callback!(null, rows, stats, metadata);
           });
