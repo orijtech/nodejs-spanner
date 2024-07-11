@@ -34,6 +34,7 @@ Google APIs Client Libraries, in [Client Libraries Explained][explained].
   * [Before you begin](#before-you-begin)
   * [Installing the client library](#installing-the-client-library)
   * [Using the client library](#using-the-client-library)
+* [Observability](#observability)
 * [Samples](#samples)
 * [Versioning](#versioning)
 * [Contributing](#contributing)
@@ -81,6 +82,97 @@ rows.forEach(row => console.log(row));
 
 ```
 
+
+## Observability
+
+This package has been instrumented with [OpenTelemetry](https://opentelemetry.io/docs/languages/js/) for tracing. Make sure to firstly import and enable
+OpenTelemetry before importing this Spanner library.
+
+To test out trace examination, you can use the Zipkin tracing service like this.
+
+```javascript
+function exportSpans(instanceId, databaseId, projectId) {
+  // Firstly initiate OpenTelemetry
+  const {Resource} = require('@opentelemetry/resources');
+  const {NodeSDK} = require('@opentelemetry/sdk-node');
+  const {trace} = require('@opentelemetry/api');
+  const {
+    NodeTracerProvider,
+    TraceIdRatioBasedSampler,
+  } = require('@opentelemetry/sdk-trace-node');
+  const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
+  const {
+    SEMRESATTRS_SERVICE_NAME,
+    SEMRESATTRS_SERVICE_VERSION,
+  } = require('@opentelemetry/semantic-conventions');
+
+  const resource = Resource.default().merge(
+    new Resource({
+      [SEMRESATTRS_SERVICE_NAME]: 'spanner-sample',
+      [SEMRESATTRS_SERVICE_VERSION]: 'v1.0.0', // Whatever version of your app is running.,
+    })
+  );
+
+  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
+  const options = {serviceName: 'nodejs-spanner'};
+  const exporter = new ZipkinExporter(options);
+
+  const sdk = new NodeSDK({
+    resource: resource,
+    traceExporter: exporter,
+    // Trace every single request to ensure that we generate
+    // enough traffic for proper examination of traces.
+    sampler: new TraceIdRatioBasedSampler(1.0),
+  });
+  sdk.start();
+
+  const provider = new NodeTracerProvider({resource: resource});
+  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+  provider.register();
+
+  // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
+  const tracer = trace.getTracer('nodejs-spanner');
+  // [END setup_tracer]
+
+  const {Spanner} = require('@google-cloud/spanner');
+
+  tracer.startActiveSpan('deleteAndCreateDatabase', span => {
+    // Creates a client
+    const spanner = new Spanner({
+      projectId: projectId,
+    });
+
+    // Gets a reference to a Cloud Spanner instance and database
+    const instance = spanner.instance(instanceId);
+    const database = instance.database(databaseId);
+    const databaseAdminClient = spanner.getDatabaseAdminClient();
+
+    const databasePath = databaseAdminClient.databasePath(
+      projectId,
+      instanceId,
+      databaseId
+    );
+
+    deleteDatabase(databaseAdminClient, databasePath, () => {
+      createDatabase(
+        databaseAdminClient,
+        projectId,
+        instanceId,
+        databaseId,
+        () => {
+          span.end();
+          console.log('main span.end');
+          setTimeout(() => {
+            console.log('finished delete and creation of the database');
+          }, 5000);
+        }
+      );
+    });
+  });
+
+  // [END spanner_export_traces]
+}
+```
 
 
 ## Samples

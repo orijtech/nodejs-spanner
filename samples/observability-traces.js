@@ -14,8 +14,6 @@
 
 'use strict';
 
-const {Spanner, MutationGroup} = require('@google-cloud/spanner');
-
 function exportSpans(instanceId, databaseId, projectId) {
   // [START spanner_export_traces]
   // Imports the Google Cloud client library and OpenTelemetry libraries for exporting traces.
@@ -27,9 +25,11 @@ function exportSpans(instanceId, databaseId, projectId) {
     NodeTracerProvider,
     TraceIdRatioBasedSampler,
   } = require('@opentelemetry/sdk-trace-node');
-  const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
-  const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
-  const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+  const {
+    BatchSpanProcessor,
+    ConsoleSpanExporter,
+    SimpleSpanProcessor,
+  } = require('@opentelemetry/sdk-trace-base');
   const {
     SEMRESATTRS_SERVICE_NAME,
     SEMRESATTRS_SERVICE_VERSION,
@@ -57,17 +57,15 @@ function exportSpans(instanceId, databaseId, projectId) {
 
   const {OTTracePropagator} = require('@opentelemetry/propagator-ot-trace');
   const provider = new NodeTracerProvider({resource: resource});
-  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   provider.register({propagator: new OTTracePropagator()});
-
-  registerInstrumentations({
-    instrumentations: [new GrpcInstrumentation()],
-  });
 
   // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
   const tracer = trace.getTracer('nodejs-spanner');
   // [END setup_tracer]
 
+  const {Spanner} = require('@google-cloud/spanner');
   /**
    * TODO(developer): Uncomment the following lines before running the sample.
    */
@@ -75,17 +73,41 @@ function exportSpans(instanceId, databaseId, projectId) {
   // const instanceId = 'my-instance';
   // const databaseId = 'my-database';
 
-  // Creates a client
-  const spanner = new Spanner({
-    projectId: projectId,
+  tracer.startActiveSpan('deleteAndCreateDatabase', span => {
+    // Creates a client
+    const spanner = new Spanner({
+      projectId: projectId,
+    });
+
+    // Gets a reference to a Cloud Spanner instance and database
+    const instance = spanner.instance(instanceId);
+    const database = instance.database(databaseId);
+    const databaseAdminClient = spanner.getDatabaseAdminClient();
+
+    const databasePath = databaseAdminClient.databasePath(
+      projectId,
+      instanceId,
+      databaseId
+    );
+
+    deleteDatabase(databaseAdminClient, databasePath, () => {
+      createDatabase(
+        databaseAdminClient,
+        projectId,
+        instanceId,
+        databaseId,
+        () => {
+          span.end();
+          console.log('main span.end');
+          setTimeout(() => {
+            exporter.forceFlush();
+            console.log('finished delete and creation of the database');
+          }, 18000);
+        }
+      );
+    });
   });
 
-  // Gets a reference to a Cloud Spanner instance and database
-  const instance = spanner.instance(instanceId);
-  const database = instance.database(databaseId);
-  // const databaseAdminClient = spanner.getDatabaseAdminClient();
-
-  insertUsingDml(tracer, database);
   // [END spanner_export_traces]
 }
 
@@ -162,6 +184,8 @@ function createDropIndices(tracer, databaseAdminClient, database) {
 }
 
 function runMutations(tracer, database) {
+  const {MutationGroup} = require('@google-cloud/spanner');
+
   // Create Mutation Groups
   /**
    * Related mutations should be placed in a group, such as insert mutations for both a parent and a child row.
@@ -278,6 +302,93 @@ function insertUsingDml(tracer, database) {
       }
     });
   });
+}
+
+function createTableWithForeignKeyDeleteCascade(
+  databaseAdminClient,
+  databasePath
+) {
+  const requests = [
+    'DROP TABLE Customers',
+    'DROP TABLE ShoppingCarts',
+    `CREATE TABLE Customers (
+        CustomerId INT64,
+        CustomerName STRING(62) NOT NULL
+        ) PRIMARY KEY (CustomerId)`,
+    `CREATE TABLE ShoppingCarts (
+        CartId INT64 NOT NULL,
+        CustomerId INT64 NOT NULL,
+        CustomerName STRING(62) NOT NULL,
+        CONSTRAINT FKShoppingCartsCustomerId FOREIGN KEY (CustomerId)
+        REFERENCES Customers (CustomerId) ON DELETE CASCADE,    
+      ) PRIMARY KEY (CartId)`,
+  ];
+
+  async function doDDL() {
+    const [operation] = await databaseAdminClient.updateDatabaseDdl({
+      database: databasePath,
+      statements: requests,
+    });
+
+    console.log(`Waiting for operation on ${databaseId} to complete...`);
+    await operation.promise();
+
+    console.log(request);
+  }
+
+  doDDL();
+}
+
+function createDatabase(
+  databaseAdminClient,
+  projectId,
+  instanceId,
+  databaseId,
+  callback
+) {
+  async function doCreateDatabase() {
+    // Create the database with default tables.
+    const createSingersTableStatement = `
+      CREATE TABLE Singers (
+        SingerId   INT64 NOT NULL,
+        FirstName  STRING(1024),
+        LastName   STRING(1024),
+        SingerInfo BYTES(MAX)
+      ) PRIMARY KEY (SingerId)`;
+    const createAlbumsStatement = `
+      CREATE TABLE Albums (
+        SingerId     INT64 NOT NULL,
+        AlbumId      INT64 NOT NULL,
+        AlbumTitle   STRING(MAX)
+      ) PRIMARY KEY (SingerId, AlbumId),
+        INTERLEAVE IN PARENT Singers ON DELETE CASCADE`;
+
+    const [operation] = await databaseAdminClient.createDatabase({
+      createStatement: 'CREATE DATABASE `' + databaseId + '`',
+      extraStatements: [createSingersTableStatement, createAlbumsStatement],
+      parent: databaseAdminClient.instancePath(projectId, instanceId),
+    });
+
+    console.log(`Waiting for creation of ${databaseId} to complete...`);
+    await operation.promise();
+    console.log(`Created database ${databaseId}`);
+    callback();
+  }
+  doCreateDatabase();
+}
+
+function deleteDatabase(databaseAdminClient, databasePath, callback) {
+  async function doDropDatabase() {
+    const [operation] = await databaseAdminClient.dropDatabase({
+      database: databasePath,
+    });
+
+    await operation;
+    console.log('Finished dropping the database');
+    callback();
+  }
+
+  doDropDatabase();
 }
 
 require('yargs')

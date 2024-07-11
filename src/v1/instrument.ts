@@ -31,6 +31,10 @@ import {trace} from '@opentelemetry/api';
 const tracer = trace.getTracer('nodejs-spanner');
 const SPAN_CODE_ERROR = SpanStatusCode.ERROR;
 
+registerInstrumentations({
+  instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
+});
+
 export {SPAN_CODE_ERROR, tracer};
 
 export function spanCode(span, err) {
@@ -53,10 +57,6 @@ export function startTraceExport(exporter) {
   const provider = new NodeTracerProvider();
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.register();
-
-  registerInstrumentations({
-    instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
-  });
 }
 
 /**

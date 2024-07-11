@@ -40,6 +40,7 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './database_admin_client_config.json';
 const version = require('../../../package.json').version;
 
+const {Span} = require('@opentelemetry/api');
 import {tracer, SPAN_CODE_ERROR} from './instrument';
 
 /**
@@ -475,51 +476,80 @@ export class DatabaseAdminClient {
       const callPromise = this.databaseAdminStub.then(
         stub =>
           (...args: Array<{}>) => {
-            return tracer.startActiveSpan(
-              'cloud.google.com/nodejs/spanner/DatabaseAdminClient.' +
-                methodName,
-              span => {
-                if (this._terminated) {
-                  const msg = 'The client has already been closed.';
-                  span.setStatus({
-                    code: SPAN_CODE_ERROR,
-                    message: msg,
-                  });
-                  span.end();
-                  return Promise.reject(msg);
-                }
-                const func = stub[methodName];
-                const call = func.apply(stub, args);
+            console.log('running', methodName);
+            if (this._terminated) {
+              const msg = 'The client has already been closed.';
+              return Promise.reject(msg);
+            }
 
-                // TODO: Add a custom interface implementation check.
-                // Retrieve all the already set 'end' event listeners and
-                // add our span.end() invocation as the last one.
-                const priorEndListeners = call.listeners('end');
-                call.on('end', () => {
-                  priorEndListeners.forEach(fn => {
-                    fn();
-                  });
-                  span.end();
-                });
+            const func = stub[methodName];
+            // call is of the type grpc.ClientUnaryCall.
+            // gRPC events are emitted at different intervals
+            // like when metadata is generated, on an error and
+            // status set after completion of the call.
+            const call = func.apply(stub, args);
 
-                // Override the 'error' event listeners and then
-                // set our span.setError for the call.
-                const priorErrListeners = call.listeners('error');
-                call.on('error', err => {
-                  priorErrListeners.forEach(fn => {
-                    fn(err);
-                  });
+            let span: typeof Span;
 
-                  span.setStatus({
-                    code: SPAN_CODE_ERROR,
-                    message: err.toString(),
-                  });
-                  span.end();
-                });
+            // Sadly, patching the the call isn't working directly
+            // so for starters we shall have the less accurate 'metadata'
+            // event listener which will trigger the start of the span
+            // after we've received back metadata.
+            // TODO: Properly patch the invoking call.call.
+            const priorMetadataListeners = call.listeners('metadata');
+            call.on('metadata', metadata => {
+              priorMetadataListeners.forEach(fn => {
+                fn(metadata);
+              });
 
-                return call;
+              if (span) {
+                return;
               }
-            );
+
+              tracer.startActiveSpan(
+                'cloud.google.com/nodejs/spanner/DatabaseAdminClient.' +
+                  methodName,
+                currSpan => {
+                  span = currSpan;
+                  console.log(
+                    'started the span and intercepted.metadata',
+                    methodName
+                  );
+                }
+              );
+            });
+
+            const priorErrorListeners = call.listeners('error');
+            call.on('error', err => {
+              priorErrorListeners.forEach(fn => {
+                fn(err);
+              });
+
+              console.log('intercepted.error', methodName, err.toString());
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              span.end();
+            });
+
+            const priorStatusListeners = call.listeners('status');
+            call.on('status', status => {
+              priorStatusListeners.forEach(fn => {
+                fn(status);
+              });
+
+              console.log('intercepted.status', methodName);
+              if (status.code !== 0) {
+                span.setStatus({
+                  code: SPAN_CODE_ERROR,
+                  message: status.message,
+                });
+              }
+              span.end();
+            });
+
+            return call;
           },
         (err: Error | null | undefined) => () => {
           throw err;
