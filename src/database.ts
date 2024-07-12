@@ -3148,7 +3148,12 @@ class Database extends common.GrpcServiceObject {
             transaction!.excludeTxnFromChangeStreams();
           }
 
-          const release = this.pool_.release.bind(this.pool_, session!);
+          const release = () => {
+              span.end();
+              console.log('releasing from pool');
+              this.pool_.release(session!);
+          }
+
           const runner = new TransactionRunner(
             session!,
             transaction!,

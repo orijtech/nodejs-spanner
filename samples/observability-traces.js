@@ -57,7 +57,7 @@ function exportSpans(instanceId, databaseId, projectId) {
 
   const {OTTracePropagator} = require('@opentelemetry/propagator-ot-trace');
   const provider = new NodeTracerProvider({resource: resource});
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   provider.register({propagator: new OTTracePropagator()});
 
