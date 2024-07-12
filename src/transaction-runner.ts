@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import {promisify} from '@google-cloud/promisify';
 import {grpc} from 'google-gax';
 import {Root} from 'protobufjs';
 import * as through from 'through2';
@@ -26,6 +25,7 @@ import {isSessionNotFoundError} from './session-pool';
 import {Database} from './database';
 import {google} from '../protos/protos';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
+import {promisify} from './v1/instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const jsonProtos = require('../protos/protos.json');

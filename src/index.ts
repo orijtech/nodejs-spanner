@@ -17,7 +17,6 @@
 import {GrpcService, GrpcServiceConfig} from './common-grpc/service';
 import {PreciseDate} from '@google-cloud/precise-date';
 import {replaceProjectIdToken} from '@google-cloud/projectify';
-import {promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import {GoogleAuth, GoogleAuthOptions} from 'google-auth-library';
 import * as path from 'path';
@@ -80,7 +79,7 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
-import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');

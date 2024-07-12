@@ -23,7 +23,6 @@ import {
 } from '@google-cloud/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const common = require('./common-grpc/service-object');
-import {promisify, promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import * as r from 'teeny-request';
 import * as streamEvents from 'stream-events';
@@ -102,7 +101,13 @@ import Policy = google.iam.v1.Policy;
 import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
-import {tracer, SPAN_CODE_ERROR, callbackifyAll} from './v1/instrument';
+import {
+  tracer,
+  SPAN_CODE_ERROR,
+  callbackifyAll,
+  promisify,
+  promisifyAll,
+} from './v1/instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
   IDatabaseRole,
@@ -3103,6 +3108,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrRunFn: RunTransactionOptions | RunTransactionCallback,
     fn?: RunTransactionCallback
   ): void {
+    console.log('database.runTransaction', fn);
     tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Database.runTransaction',
       span => {
@@ -3116,6 +3122,7 @@ class Database extends common.GrpcServiceObject {
             : {};
 
         this.pool_.getSession((err, session?, transaction?) => {
+          console.log('getSession', err);
           if (err) {
             span.setStatus({
               code: SPAN_CODE_ERROR,
@@ -3150,12 +3157,19 @@ class Database extends common.GrpcServiceObject {
           );
 
           runner.run().then(release, err => {
+            console.log('runner.result', err);
+            if (err) {
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+            }
+            span.end();
+
             if (isSessionNotFoundError(err)) {
-              span.end();
               release();
               this.runTransaction(options, runFn!);
             } else {
-              span.end();
               setImmediate(runFn!, err);
               release();
             }

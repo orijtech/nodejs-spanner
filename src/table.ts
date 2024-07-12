@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import {promisifyAll} from '@google-cloud/promisify';
 import * as through from 'through2';
 import {Operation as GaxOperation, CallOptions} from 'google-gax';
 import {Database, UpdateSchemaCallback, UpdateSchemaResponse} from './database';
@@ -31,7 +30,7 @@ import {
 import {google as databaseAdmin} from '../protos/protos';
 import {Schema, LongRunningCallback} from './common';
 import IRequestOptions = databaseAdmin.spanner.v1.IRequestOptions;
-import {tracer, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, tracer, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type Key = string | string[];
 

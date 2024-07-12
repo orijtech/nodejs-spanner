@@ -97,12 +97,15 @@ function exportSpans(instanceId, databaseId, projectId) {
         instanceId,
         databaseId,
         () => {
-          span.end();
-          console.log('main span.end');
-          setTimeout(() => {
-            exporter.forceFlush();
-            console.log('finished delete and creation of the database');
-          }, 18000);
+          insertUsingDml(tracer, database, () => {
+            console.log('main span.end');
+            span.end();
+            setTimeout(() => {
+              spanner.close();
+              exporter.forceFlush();
+              console.log('finished delete and creation of the database');
+            }, 8000);
+          });
         }
       );
     });
@@ -265,7 +268,7 @@ function runMutations(tracer, database) {
   });
 }
 
-function insertUsingDml(tracer, database) {
+function insertUsingDml(tracer, database, callback) {
   tracer.startActiveSpan('insertUsingDML', span => {
     database.runTransaction(async (err, transaction) => {
       if (err) {
@@ -293,12 +296,20 @@ function insertUsingDml(tracer, database) {
         );
 
         await transaction.commit();
-        span.end();
       } catch (err) {
         console.error('ERROR:', err);
       } finally {
         // Close the database when finished.
-        setTimeout(() => {}, 8000);
+        console.log('exiting insertUsingDml');
+        tracer.startActiveSpan('timingOutToExport-insertUsingDML', eSpan => {
+          setTimeout(() => {
+            eSpan.end();
+            span.end();
+            if (callback) {
+              callback();
+            }
+          }, 50);
+        });
       }
     });
   });
