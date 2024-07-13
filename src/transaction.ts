@@ -401,9 +401,7 @@ export class Snapshot extends EventEmitter {
     gaxOptionsOrCallback?: CallOptions | BeginTransactionCallback,
     cb?: BeginTransactionCallback
   ): void | Promise<BeginResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.begin'
-    );
+    const span = startTrace('Transaction.begin');
     const gaxOpts =
       typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
     const callback =
@@ -907,7 +905,7 @@ export class Snapshot extends EventEmitter {
     requestOrCallback: ReadRequest | ReadCallback,
     cb?: ReadCallback
   ): void | Promise<ReadResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Transaction.read');
+    const span = startTrace('Transaction.read');
     const rows: Rows = [];
 
     let request: ReadRequest;
@@ -1019,7 +1017,7 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Transaction.run');
+    const span = startTrace('Transaction.run');
     const rows: Rows = [];
     let stats: google.spanner.v1.ResultSetStats;
     let metadata: google.spanner.v1.ResultSetMetadata;
@@ -1149,9 +1147,7 @@ export class Snapshot extends EventEmitter {
    * ```
    */
   runStream(query: string | ExecuteSqlRequest): PartialResultStream {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.runStream'
-    );
+    const span = startTrace('Transaction.runStream');
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
@@ -1558,9 +1554,7 @@ export class Dml extends Snapshot {
     query: string | ExecuteSqlRequest,
     callback?: RunUpdateCallback
   ): void | Promise<RunUpdateResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.runUpdate'
-    );
+    const span = startTrace('Transaction.runUpdate');
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
@@ -1789,9 +1783,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: BatchUpdateOptions | CallOptions | BatchUpdateCallback,
     cb?: BatchUpdateCallback
   ): Promise<BatchUpdateResponse> | void {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.batchUpdate'
-    );
+    const span = startTrace('Transaction.batchUpdate');
     const options =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -2011,9 +2003,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: CommitOptions | CallOptions | CommitCallback,
     cb?: CommitCallback
   ): void | Promise<CommitResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.commit'
-    );
+    const span = startTrace('Transaction.commit');
     const options =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -2375,9 +2365,7 @@ export class Transaction extends Dml {
       | spannerClient.spanner.v1.Spanner.RollbackCallback,
     cb?: spannerClient.spanner.v1.Spanner.RollbackCallback
   ): void | Promise<void> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Transaction.rollback'
-    );
+    const span = startTrace('Transaction.rollback');
     const gaxOpts =
       typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
     const callback =

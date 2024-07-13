@@ -1072,7 +1072,7 @@ class Table {
     options: MutateRowsOptions | CallOptions = {},
     callback: CommitCallback
   ): void {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Table.' + method);
+    const span = startTrace('Table.' + method);
     const requestOptions =
       'requestOptions' in options ? options.requestOptions : {};
 

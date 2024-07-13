@@ -156,9 +156,7 @@ export class SpannerClient {
 
     // Load google-gax module synchronously if needed
     if (!gaxInstance) {
-      const span = startTrace(
-        'cloud.google.com/nodejs/spanner/SpannerClient.loadGax'
-      );
+      const span = startTrace('SpannerClient.loadGax');
       gaxInstance = require('google-gax') as typeof gax;
       span.end();
     }
@@ -167,9 +165,7 @@ export class SpannerClient {
     this._gaxModule = opts.fallback ? gaxInstance.fallback : gaxInstance;
 
     // Create a `gaxGrpc` object, with any grpc-specific options sent to the client.
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.newGrpcClient'
-    );
+    const span = startTrace('SpannerClient.newGrpcClient');
     this._gaxGrpc = new this._gaxModule.GrpcClient(opts);
     span.end();
 
@@ -322,8 +318,7 @@ export class SpannerClient {
       const callPromise = this.spannerStub.then(
         stub =>
           (...args: Array<{}>) => {
-            const spanName =
-              'cloud.google.com/nodejs/spanner/SpannerClient.' + methodName;
+            const spanName = 'SpannerClient.' + methodName;
             const span = startTrace(spanName);
             const msg = 'The client has already been closed';
             if (this._terminated) {
@@ -2484,9 +2479,7 @@ export class SpannerClient {
    * @returns {Promise} A promise that resolves when the client is closed.
    */
   close(): Promise<void> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.close'
-    );
+    const span = startTrace('SpannerClient.close');
     if (this.spannerStub && !this._terminated) {
       return this.spannerStub.then(stub => {
         this._terminated = true;

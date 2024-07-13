@@ -506,10 +506,7 @@ export class DatabaseAdminClient {
                 return;
               }
 
-              span = startTrace(
-                'cloud.google.com/nodejs/spanner/DatabaseAdminClient.' +
-                  methodName
-              );
+              span = startTrace('DatabaseAdminClient.' + methodName);
               console.log(
                 'started the span and intercepted.metadata',
                 methodName

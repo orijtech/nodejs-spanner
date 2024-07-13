@@ -876,9 +876,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CreateDatabaseOptions | CreateDatabaseCallback,
     cb?: CreateDatabaseCallback
   ): void | Promise<CreateDatabaseResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Instance.createDatabase'
-    );
+    const span = startTrace('Instance.createDatabase');
     if (!name) {
       const msg = 'A name is required to create a database.';
       span.setStatus({
@@ -1051,7 +1049,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | DeleteInstanceCallback,
     cb?: DeleteInstanceCallback
   ): void | Promise<DeleteInstanceResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Instance.delete');
+    const span = startTrace('Instance.delete');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1137,7 +1135,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | ExistsInstanceCallback,
     cb?: ExistsInstanceCallback
   ): void | Promise<ExistsInstanceResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Instance.exists');
+    const span = startTrace('Instance.exists');
     const gaxOptions =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1220,7 +1218,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: GetInstanceConfig | GetInstanceCallback,
     cb?: GetInstanceCallback
   ): void | Promise<GetInstanceResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Instance.get');
+    const span = startTrace('Instance.get');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1259,9 +1257,7 @@ class Instance extends common.GrpcServiceObject {
       const createOptions = extend(true, {}, options);
       delete createOptions.fieldNames;
       delete createOptions.autoCreate;
-      const createSpan = startTrace(
-        'cloud.google.com/nodejs/spanner/Instance.create'
-      );
+      const createSpan = startTrace('Instance.create');
       this.create(
         createOptions,
         (
@@ -1383,9 +1379,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: GetDatabasesOptions | GetDatabasesCallback,
     cb?: GetDatabasesCallback
   ): void | Promise<GetDatabasesResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Instance.getDatabases'
-    );
+    const span = startTrace('Instance.getDatabases');
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const callback =
@@ -1602,9 +1596,7 @@ class Instance extends common.GrpcServiceObject {
       | GetInstanceMetadataCallback,
     cb?: GetInstanceMetadataCallback
   ): Promise<GetInstanceMetadataResponse> | void {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Instance.getMetadata'
-    );
+    const span = startTrace('Instance.getMetadata');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1706,9 +1698,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | SetInstanceMetadataCallback,
     cb?: SetInstanceMetadataCallback
   ): void | Promise<SetInstanceMetadataResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Instance.setMetadata'
-    );
+    const span = startTrace('Instance.setMetadata');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =

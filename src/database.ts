@@ -655,9 +655,7 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions'
-    );
+    const span = startTrace('Database.batchCreateSessions');
 
     if (typeof options === 'number') {
       options = {count: options};
@@ -2030,9 +2028,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | GetSnapshotCallback,
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Database.getSnapshot'
-    );
+    const span = startTrace('Database.getSnapshot');
     console.log(`span: ${span}`);
     const callback =
       typeof optionsOrCallback === 'function'
@@ -2732,7 +2728,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | RunCallback,
     cb?: RunCallback
   ): void | Promise<RunResponse> {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Database.run');
+    const span = startTrace('Database.run');
 
     let stats: ResultSetStats;
     let metadata: ResultSetMetadata;
@@ -2966,9 +2962,7 @@ class Database extends common.GrpcServiceObject {
     query: string | ExecuteSqlRequest,
     options?: TimestampBounds
   ): PartialResultStream {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Database.runStream'
-    );
+    const span = startTrace('Database.runStream');
 
     const proxyStream: Transform = through.obj();
 
@@ -3134,9 +3128,7 @@ class Database extends common.GrpcServiceObject {
     fn?: RunTransactionCallback
   ): void {
     console.log('database.runTransaction', fn);
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Database.runTransaction'
-    );
+    const span = startTrace('Database.runTransaction');
     const runFn =
       typeof optionsOrRunFn === 'function'
         ? (optionsOrRunFn as RunTransactionCallback)
@@ -3385,9 +3377,7 @@ class Database extends common.GrpcServiceObject {
     mutationGroups: MutationGroup[],
     options?: BatchWriteOptions
   ): NodeJS.ReadableStream {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Database.batchWriteAtLeastOnce'
-    );
+    const span = startTrace('Database.batchWriteAtLeastOnce');
     const proxyStream: Transform = through.obj();
 
     this.pool_.getSession((err, session) => {

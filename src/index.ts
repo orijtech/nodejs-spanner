@@ -414,7 +414,7 @@ class Spanner extends GrpcService {
 
   /** Closes this Spanner client and cleans up all resources used by it. */
   close(): void {
-    const span = startTrace('cloud.google.com/nodejs/spanner/Spanner.close');
+    const span = startTrace('Spanner.close');
     this.clients_.forEach(c => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const client = c as any;
@@ -528,9 +528,7 @@ class Spanner extends GrpcService {
     config: CreateInstanceRequest,
     callback?: CreateInstanceCallback
   ): void | Promise<CreateInstanceResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.createInstance'
-    );
+    const span = startTrace('SpannerClient.createInstance');
     if (!name) {
       span.setStatus({
         code: SPAN_CODE_ERROR,
@@ -707,6 +705,8 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstancesOptions | GetInstancesCallback,
     cb?: GetInstancesCallback
   ): Promise<GetInstancesResponse> | void {
+    const span = startTrace('SpannerClient.getInstances');
+
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const options =
@@ -739,9 +739,6 @@ class Spanner extends GrpcService {
       delete (gaxOpts as GetInstancesOptions).pageSize;
     }
 
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstances'
-    );
     this.request(
       {
         client: 'InstanceAdminClient',
@@ -955,9 +952,7 @@ class Spanner extends GrpcService {
     config: CreateInstanceConfigRequest,
     callback?: CreateInstanceConfigCallback
   ): void | Promise<CreateInstanceConfigResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.createInstanceConfig'
-    );
+    const span = startTrace('SpannerClient.createInstanceConfig');
     if (!name) {
       const msg = 'A name is required to create an instance config.';
       span.setStatus({
@@ -1135,9 +1130,7 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigsOptions | GetInstanceConfigsCallback,
     cb?: GetInstanceConfigsCallback
   ): Promise<GetInstanceConfigsResponse> | void {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigs'
-    );
+    const span = startTrace('SpannerClient.getInstanceConfigs');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
     const options =
@@ -1331,9 +1324,7 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigOptions | GetInstanceConfigCallback,
     cb?: GetInstanceConfigCallback
   ): Promise<GetInstanceConfigResponse> | void {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfig'
-    );
+    const span = startTrace('SpannerClient.getInstanceConfig');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
     const options =
@@ -1449,9 +1440,7 @@ class Spanner extends GrpcService {
       | GetInstanceConfigOperationsCallback,
     cb?: GetInstanceConfigOperationsCallback
   ): void | Promise<GetInstanceConfigOperationsResponse> {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigOperations'
-    );
+    const span = startTrace('SpannerClient.getInstanceConfigOperations');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1569,9 +1558,7 @@ class Spanner extends GrpcService {
    * @param {function} callback Callback function
    */
   prepareGapicRequest_(config, callback) {
-    const span = startTrace(
-      'cloud.google.com/nodejs/spanner/Spanner.prepareGapicRequest'
-    );
+    const span = startTrace('Spanner.prepareGapicRequest');
     this.auth.getProjectId((err, projectId) => {
       if (err) {
         span.setStatus({

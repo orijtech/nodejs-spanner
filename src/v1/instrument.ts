@@ -47,7 +47,7 @@ export {SPAN_CODE_ERROR};
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
 export function startTrace(spanName): Span {
-  const span = tracer.startSpan(spanName);
+  const span = tracer.startSpan('cloud.google.com/nodejs/spanner/' + spanName);
   const ctx = trace.setSpan(context.active(), span);
   return span;
 }

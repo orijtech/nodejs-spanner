@@ -125,9 +125,7 @@ class BatchTransaction extends Snapshot {
    * region_tag:spanner_batch_client
    */
   createQueryPartitions(query, callback) {
-    const span = startTrace(
-      'cloud.google.com/nodejs/BatchTransaction.createQueryPartitions'
-    );
+    const span = startTrace('BatchTransaction.createQueryPartitions');
     if (is.string(query)) {
       query = {
         sql: query,
@@ -176,9 +174,7 @@ class BatchTransaction extends Snapshot {
    * @param {function} callback Callback function.
    */
   createPartitions_(config, callback) {
-    const span = startTrace(
-      'cloud.google.com/nodejs/BatchTransaction.createPartitions'
-    );
+    const span = startTrace('BatchTransaction.createPartitions');
     const query = extend({}, config.reqOpts, {
       session: this.session.formattedName_,
       transaction: {id: this.id},
@@ -248,9 +244,7 @@ class BatchTransaction extends Snapshot {
    * @returns {Promise<CreateReadPartitionsResponse>}
    */
   createReadPartitions(options, callback) {
-    const span = startTrace(
-      'cloud.google.com/nodejs/BatchTransaction.createReadPartitions'
-    );
+    const span = startTrace('BatchTransaction.createReadPartitions');
     const reqOpts = Object.assign({}, options, {
       keySet: Snapshot.encodeKeySet(options),
     });
