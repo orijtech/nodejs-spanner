@@ -32,7 +32,6 @@ const {
 import {context, trace} from '@opentelemetry/api';
 // TODO: Infer the tracer from either the provided context or globally.
 const tracer = trace.getTracer('nodejs-spanner');
-const SPAN_CODE_ERROR = SpanStatusCode.ERROR;
 
 // Ensure that the auto-instrumentation for gRPC & HTTP generates
 // traces that'll be displayed along with the spans we've created.
@@ -40,16 +39,30 @@ registerInstrumentations({
   instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
 });
 
-export {SPAN_CODE_ERROR};
-
 // startSpan synchronously returns a span to avoid the dramatic
 // scope change in which trying to use tracer.startActiveSpan
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
-export function startTrace(spanName): Span {
-  const span = tracer.startSpan('cloud.google.com/nodejs/spanner/' + spanName);
-  const ctx = trace.setSpan(context.active(), span);
+export function startTrace(spanNameSuffix: String): Span {
+  const span = tracer.startSpan(
+    'cloud.google.com/nodejs/spanner/' + spanNameSuffix
+  );
+  // Now set the span as the active one in the current context so that
+  // future invocations to startTrace will have this current span as
+  // the parent.
+  trace.setSpan(context.active(), span);
   return span;
+}
+
+export function setSpanError(span: Span, err: Error | String) {
+  if (!err) {
+    return;
+  }
+
+  span.setStatus({
+    code: SpanStatusCode.ERROR,
+    message: err.toString(),
+  });
 }
 
 /**
@@ -88,10 +101,7 @@ function callbackify(originalMethod: typeof CallbackMethod) {
         cb(null, ...res);
       },
       (err: Error) => {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         cb(err);
       }
@@ -200,10 +210,7 @@ export function promisify(
         const err = callbackArgs.shift();
 
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           return reject(err);
         }

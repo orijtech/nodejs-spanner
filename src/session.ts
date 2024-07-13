@@ -43,7 +43,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 
@@ -250,10 +250,7 @@ export class Session extends common.GrpcServiceObject {
 
         return database.createSession(options, (err, session, apiResponse) => {
           if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
+            setSpanError(span, err);
             span.end();
             callback(err, null, apiResponse);
             return;
@@ -406,10 +403,7 @@ export class Session extends common.GrpcServiceObject {
       },
       (err, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         if (resp) {
@@ -467,10 +461,7 @@ export class Session extends common.GrpcServiceObject {
       },
       err => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         span.end();
         callback!(err);

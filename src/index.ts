@@ -79,7 +79,7 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');
@@ -530,22 +530,16 @@ class Spanner extends GrpcService {
   ): void | Promise<CreateInstanceResponse> {
     const span = startTrace('SpannerClient.createInstance');
     if (!name) {
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: 'A name is required to create an instance',
-      });
+      const msg = 'A name is required to create an instance';
+      setSpanError(span, msg);
       span.end();
-      throw new GoogleError('A name is required to create an instance.');
+      throw new GoogleError(msg);
     }
     if (!config) {
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: 'A configuration object is required to create an instance',
-      });
+      const msg = 'A configuration object is required to create an instance';
+      setSpanError(span, msg);
       span.end();
-      throw new GoogleError(
-        ['A configuration object is required to create an instance.'].join('')
-      );
+      throw new GoogleError([msg].join(''));
     }
     const formattedName = Instance.formatName_(this.projectId, name);
     const displayName = config.displayName || formattedName.split('/').pop();
@@ -564,14 +558,10 @@ class Spanner extends GrpcService {
     };
 
     if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: 'Only one of nodeCount or processingUnits can be specified',
-      });
+      const msg = 'Only one of nodeCount or processingUnits can be specified';
+      setSpanError(span, msg);
       span.end();
-      throw new GoogleError(
-        ['Only one of nodeCount or processingUnits can be specified.'].join('')
-      );
+      throw new GoogleError([msg].join(''));
     }
     if (!reqOpts.instance.nodeCount && !reqOpts.instance.processingUnits) {
       // If neither nodes nor processingUnits are specified, default to a
@@ -595,11 +585,7 @@ class Spanner extends GrpcService {
       },
       (err, operation, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message:
-              'Only one of nodeCount or processingUnits can be specified',
-          });
+          setSpanError(span, err);
           span.end();
           callback!(err, null, null, resp);
           return;
@@ -757,10 +743,7 @@ class Spanner extends GrpcService {
           });
         }
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         const nextQuery = nextPageRequest!
           ? extend({}, options, nextPageRequest!)
@@ -955,30 +938,21 @@ class Spanner extends GrpcService {
     const span = startTrace('SpannerClient.createInstanceConfig');
     if (!name) {
       const msg = 'A name is required to create an instance config.';
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: msg,
-      });
+      setSpanError(span, msg);
       span.end();
       throw new GoogleError(msg);
     }
     if (!config) {
       const msg =
         'A configuration object is required to create an instance config.';
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: msg,
-      });
+      setSpanError(span, msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
     if (!config.baseConfig) {
       const msg =
         'Base instance config is required to create an instance config.';
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: msg,
-      });
+      setSpanError(span, msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
@@ -1019,10 +993,7 @@ class Spanner extends GrpcService {
       },
       (err, operation, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           callback!(err, null, null, resp);
           return;
@@ -1170,10 +1141,7 @@ class Spanner extends GrpcService {
       },
       (err, instanceConfigs, nextPageRequest, ...args) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         const nextQuery = nextPageRequest!
@@ -1350,10 +1318,7 @@ class Spanner extends GrpcService {
       },
       (err, instanceConfig) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         span.end();
         callback!(err, instanceConfig);
@@ -1478,10 +1443,7 @@ class Spanner extends GrpcService {
       },
       (err, operations, nextPageRequest, ...args) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         const nextQuery = nextPageRequest!
@@ -1561,10 +1523,7 @@ class Spanner extends GrpcService {
     const span = startTrace('Spanner.prepareGapicRequest');
     this.auth.getProjectId((err, projectId) => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         callback(err);
         return;

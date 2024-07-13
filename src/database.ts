@@ -103,7 +103,7 @@ import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
 import {
   startTrace,
-  SPAN_CODE_ERROR,
+  setSpanError,
   callbackifyAll,
   promisify,
   promisifyAll,
@@ -686,10 +686,7 @@ class Database extends common.GrpcServiceObject {
       },
       (err, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           callback!(err, null, resp!);
           return;
@@ -2041,10 +2038,7 @@ class Database extends common.GrpcServiceObject {
 
     this.pool_.getSession((err, session) => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         callback!(err as ServiceError);
         return;
@@ -2054,10 +2048,7 @@ class Database extends common.GrpcServiceObject {
 
       snapshot.begin(err => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           if (isSessionNotFoundError(err)) {
             session!.lastError = err;
             this.pool_.release(session!);
@@ -2744,10 +2735,7 @@ class Database extends common.GrpcServiceObject {
 
     this.runStream(query, options)
       .on('error', err => {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         callback!(err as grpc.ServiceError, rows, stats, metadata);
       })
       .on('response', response => {
@@ -2968,10 +2956,7 @@ class Database extends common.GrpcServiceObject {
 
     this.pool_.getSession((err, session) => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         proxyStream.destroy(err);
         span.end();
         return;
@@ -2987,10 +2972,7 @@ class Database extends common.GrpcServiceObject {
       dataStream
         .once('data', () => (dataReceived = true))
         .once('error', err => {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
 
           if (
             !dataReceived &&
@@ -3141,10 +3123,7 @@ class Database extends common.GrpcServiceObject {
     this.pool_.getSession((err, session?, transaction?) => {
       console.log('getSession', err);
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
       }
 
       if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
@@ -3181,10 +3160,7 @@ class Database extends common.GrpcServiceObject {
       runner.run().then(release, err => {
         console.log('runner.result', err);
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         span.end();
 
@@ -3382,10 +3358,7 @@ class Database extends common.GrpcServiceObject {
 
     this.pool_.getSession((err, session) => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         proxyStream.destroy(err);
         return;
@@ -3431,11 +3404,7 @@ class Database extends common.GrpcServiceObject {
             proxyStream.destroy(err);
           }
 
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
-
+          setSpanError(span, err);
           span.end();
         })
         .once('end', () => {

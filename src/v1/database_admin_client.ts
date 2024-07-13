@@ -41,7 +41,7 @@ import * as gapicConfig from './database_admin_client_config.json';
 const version = require('../../../package.json').version;
 
 const {Span} = require('@opentelemetry/api');
-import {startTrace, SPAN_CODE_ERROR} from './instrument';
+import {startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner Database Admin API
@@ -520,10 +520,7 @@ export class DatabaseAdminClient {
               });
 
               console.log('intercepted.error', methodName, err.toString());
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
+              setSpanError(span, err);
               span.end();
             });
 
@@ -535,10 +532,7 @@ export class DatabaseAdminClient {
 
               console.log('intercepted.status', methodName);
               if (status.code !== 0) {
-                span.setStatus({
-                  code: SPAN_CODE_ERROR,
-                  message: status.message,
-                });
+                setSpanError(span, status.message);
               }
               span.end();
             });

@@ -30,7 +30,7 @@ import {
 import {google as databaseAdmin} from '../protos/protos';
 import {Schema, LongRunningCallback} from './common';
 import IRequestOptions = databaseAdmin.spanner.v1.IRequestOptions;
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 export type Key = string | string[];
 
@@ -1088,10 +1088,7 @@ class Table {
       },
       (err, transaction) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           callback(err);
           return;

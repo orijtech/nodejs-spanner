@@ -44,7 +44,7 @@ import IQueryOptions = google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Database, Spanner} from '.';
 import ReadLockMode = google.spanner.v1.TransactionOptions.ReadWrite.ReadLockMode;
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 export type Rows = Array<Row | Json>;
 const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.retryinfo';
@@ -444,10 +444,7 @@ export class Snapshot extends EventEmitter {
         resp: spannerClient.spanner.v1.ITransaction
       ) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           callback!(err, resp);
           return;
@@ -921,10 +918,7 @@ export class Snapshot extends EventEmitter {
 
     this.createReadStream(table, request)
       .on('error', err => {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         callback!(err as grpc.ServiceError, null);
       })
       .on('data', row => rows.push(row))
@@ -1024,10 +1018,7 @@ export class Snapshot extends EventEmitter {
 
     this.runStream(query)
       .on('error', (err, rows, stats, metadata) => {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         callback!(err, rows, stats, metadata);
       })
@@ -1256,10 +1247,7 @@ export class Snapshot extends EventEmitter {
 
     finished(prs, err => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
       }
       span.end();
     });
@@ -1573,10 +1561,7 @@ export class Dml extends Snapshot {
         }
 
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         span.end();
@@ -1800,10 +1785,7 @@ export class Transaction extends Dml {
         code: 3, // invalid argument
         rowCounts,
       }) as BatchUpdateError;
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: batchError.toString(),
-      });
+      setSpanError(span, batchError);
       span.end();
       callback!(batchError, rowCounts);
       return;
@@ -1859,10 +1841,7 @@ export class Transaction extends Dml {
         if (err) {
           const rowCounts: number[] = [];
           batchUpdateError = Object.assign(err, {rowCounts});
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: batchUpdateError.toString(),
-          });
+          setSpanError(span, batchUpdateError);
           span.end();
           callback!(batchUpdateError, rowCounts, resp);
           return;
@@ -1893,10 +1872,7 @@ export class Transaction extends Dml {
             metadata: Transaction.extractKnownMetadata(status.details!),
             rowCounts,
           }) as BatchUpdateError;
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: batchUpdateError.toString(),
-          });
+          setSpanError(span, batchUpdateError);
         }
 
         span.end();
@@ -2062,10 +2038,7 @@ export class Transaction extends Dml {
         this.end();
 
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         if (resp && resp.commitTimestamp) {
@@ -2375,10 +2348,7 @@ export class Transaction extends Dml {
       const err = new Error(
         'Transaction ID is unknown, nothing to rollback.'
       ) as ServiceError;
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: err.toString(),
-      });
+      setSpanError(span, err);
       span.end();
       callback!(err);
       return;
@@ -2407,10 +2377,7 @@ export class Transaction extends Dml {
       (err: null | ServiceError) => {
         this.end();
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         span.end();
         callback!(err);

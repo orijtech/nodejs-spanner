@@ -38,7 +38,7 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './spanner_client_config.json';
 const version = require('../../../package.json').version;
 
-import {startTrace, SPAN_CODE_ERROR} from './instrument';
+import {startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner API
@@ -325,20 +325,14 @@ export class SpannerClient {
               if (methodName in this.descriptors.stream) {
                 const stream = new PassThrough();
                 setImmediate(() => {
-                  span.setStatus({
-                    code: SPAN_CODE_ERROR,
-                    message: msg,
-                  });
+                  setSpanError(span, msg);
                   stream.emit('error', new this._gaxModule.GoogleError(msg));
                   span.end();
                 });
 
                 finished(stream, err => {
                   if (err) {
-                    span.setStatus({
-                      code: SPAN_CODE_ERROR,
-                      message: err.toString(),
-                    });
+                    setSpanError(span, err);
                   }
                   span.end();
                 });
@@ -372,10 +366,7 @@ export class SpannerClient {
                 fn(err);
               });
 
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
+              setSpanError(span, err);
               span.end();
             });
 

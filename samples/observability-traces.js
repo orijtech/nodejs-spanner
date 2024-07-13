@@ -134,7 +134,12 @@ function exportSpans(instanceId, databaseId, projectId) {
 
 function quickstart() {}
 
-function createDropIndices(tracer, databaseAdminClient, database) {
+function createDropIndices(
+  tracer,
+  databaseAdminClient,
+  database,
+  databasePath
+) {
   async function createIndex(tracer, callback) {
     const span = tracer.startSpan('createIndex');
     const request = ['CREATE INDEX AlbumsByAlbumTitle ON Albums(AlbumTitle)'];
@@ -142,11 +147,7 @@ function createDropIndices(tracer, databaseAdminClient, database) {
     // Creates a new index in the database
     try {
       const [operation] = await databaseAdminClient.updateDatabaseDdl({
-        database: databaseAdminClient.databasePath(
-          projectId,
-          instanceId,
-          databaseId
-        ),
+        database: databasePath,
         statements: request,
       });
 
@@ -164,18 +165,19 @@ function createDropIndices(tracer, databaseAdminClient, database) {
     }
   }
 
-  async function dropIndex(tracer, databaseAdminClient, callback) {
+  async function dropIndex(
+    tracer,
+    databaseAdminClient,
+    callback,
+    databasePath
+  ) {
     const span = tracer.startSpan('dropIndex');
     const request = ['DROP INDEX AlbumsByAlbumTitle'];
 
     // Creates a new index in the database
     try {
       const [operation] = await databaseAdminClient.updateDatabaseDdl({
-        database: databaseAdminClient.databasePath(
-          projectId,
-          instanceId,
-          databaseId
-        ),
+        database: databasePath,
         statements: request,
       });
 
@@ -359,10 +361,10 @@ function createTableWithForeignKeyDeleteCascade(
       statements: requests,
     });
 
-    console.log(`Waiting for operation on ${databaseId} to complete...`);
+    console.log(
+      'Waiting for createTableWithForeignKeyDeleteCasscae operation...'
+    );
     await operation.promise();
-
-    console.log(request);
   }
 
   doDDL();

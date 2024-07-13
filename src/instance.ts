@@ -50,7 +50,7 @@ import {google as instanceAdmin} from '../protos/protos';
 import {google as databaseAdmin} from '../protos/protos';
 import {google as spannerClient} from '../protos/protos';
 import {CreateInstanceRequest} from './index';
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 export type IBackup = databaseAdmin.spanner.admin.database.v1.IBackup;
 export type IDatabase = databaseAdmin.spanner.admin.database.v1.IDatabase;
@@ -879,10 +879,7 @@ class Instance extends common.GrpcServiceObject {
     const span = startTrace('Instance.createDatabase');
     if (!name) {
       const msg = 'A name is required to create a database.';
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: msg,
-      });
+      setSpanError(span, msg);
       span.end();
       throw new GoogleError(msg);
     }
@@ -930,10 +927,7 @@ class Instance extends common.GrpcServiceObject {
       (err, operation, resp) => {
         if (err) {
           // TODO: Infer the status and code from translating the error.
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
           span.end();
           callback(err, null, null, resp);
           return;
@@ -1079,10 +1073,7 @@ class Instance extends common.GrpcServiceObject {
               // TODO: Create a sub-span about invoking instances_.delete
               this.parent.instances_.delete(this.id);
             } else {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
+              setSpanError(span, err);
             }
 
             span.end();
@@ -1145,10 +1136,7 @@ class Instance extends common.GrpcServiceObject {
 
     this.getMetadata({gaxOptions}, err => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
       }
 
       if (err && err.code !== NOT_FOUND) {
@@ -1242,10 +1230,7 @@ class Instance extends common.GrpcServiceObject {
       }
 
       // Otherwise an error occurred.
-      span.setStatus({
-        code: SPAN_CODE_ERROR,
-        message: err.toString(),
-      });
+      setSpanError(span, err);
 
       if (err.code !== 5 || !options.autoCreate) {
         span.end();
@@ -1266,10 +1251,7 @@ class Instance extends common.GrpcServiceObject {
           operation?: GaxOperation | null
         ) => {
           if (err) {
-            createSpan.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
+            setSpanError(createSpan, err);
             createSpan.end();
             span.end();
             callback(err);
@@ -1279,10 +1261,7 @@ class Instance extends common.GrpcServiceObject {
           // Otherwise attempt the creation operation.
           operation!
             .on('error', (err, obj, metadata) => {
-              createSpan.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
+              setSpanError(createSpan, err);
               createSpan.end();
               span.end();
               callback(err, obj, metadata);
@@ -1437,10 +1416,7 @@ class Instance extends common.GrpcServiceObject {
           : null;
 
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         span.end();
@@ -1619,10 +1595,7 @@ class Instance extends common.GrpcServiceObject {
       },
       (err, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         if (resp) {
@@ -1725,10 +1698,7 @@ class Instance extends common.GrpcServiceObject {
       },
       (err, operation, apiResponse) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
         span.end();
         callback!(err, operation, apiResponse);

@@ -24,7 +24,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
-import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;
@@ -152,10 +152,7 @@ class BatchTransaction extends Snapshot {
       },
       (err, partitions, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         span.end();
@@ -186,10 +183,7 @@ class BatchTransaction extends Snapshot {
     delete query.partitionOptions;
     this.session.request(config, (err, resp) => {
       if (err) {
-        span.setStatus({
-          code: SPAN_CODE_ERROR,
-          message: err.toString(),
-        });
+        setSpanError(span, err);
         span.end();
         callback(err, null, resp);
         return;
@@ -268,10 +262,7 @@ class BatchTransaction extends Snapshot {
       },
       (err, partitions, resp) => {
         if (err) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
+          setSpanError(span, err);
         }
 
         span.end();
