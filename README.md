@@ -96,7 +96,7 @@ Please use a tracer named "nodejs-spanner".
 `SPANNER_NODEJS_ANNOTATE_PII_SQL=1`, this is because SQL statements can be
 sensitive personally-identifiable-information (PII).**
 
-To test out trace examination, you can use the Zipkin tracing service like this.
+To test out trace examination, you can use Google Cloud Trace like this.
 
 ```javascript
 function exportSpans(instanceId, databaseId, projectId) {
@@ -121,9 +121,8 @@ function exportSpans(instanceId, databaseId, projectId) {
     })
   );
 
-  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
-  const options = {serviceName: 'nodejs-spanner'};
-  const exporter = new ZipkinExporter(options);
+  const {TraceExporter} = require('@google-cloud/opentelemetry-cloud-trace-exporter');
+  const exporter = new TraceExporter({});
 
   const sdk = new NodeSDK({
     resource: resource,

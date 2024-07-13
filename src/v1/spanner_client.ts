@@ -320,8 +320,9 @@ export class SpannerClient {
           (...args: Array<{}>) => {
             const spanName = 'SpannerClient.' + methodName;
             const span = startTrace(spanName);
-            const msg = 'The client has already been closed';
             if (this._terminated) {
+              const msg = 'The client has already been closed';
+
               if (methodName in this.descriptors.stream) {
                 const stream = new PassThrough();
                 setImmediate(() => {

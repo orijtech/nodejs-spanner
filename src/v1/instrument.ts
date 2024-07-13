@@ -30,7 +30,6 @@ const {
 } = require('@google-cloud/promisify');
 
 import {context, trace} from '@opentelemetry/api';
-// TODO: Infer the tracer from either the provided context or globally.
 const tracer = trace.getTracer('nodejs-spanner');
 
 // Ensure that the auto-instrumentation for gRPC & HTTP generates
@@ -39,7 +38,7 @@ registerInstrumentations({
   instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
 });
 
-var optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
+const optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 
 interface SQLStatement {
   sql: string;
@@ -49,7 +48,10 @@ interface SQLStatement {
 // scope change in which trying to use tracer.startActiveSpan
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
-export function startTrace(spanNameSuffix: string, sql?: string | SQLStatement): Span {
+export function startTrace(
+  spanNameSuffix: string,
+  sql?: string | SQLStatement
+): Span {
   const span = tracer.startSpan(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix
   );
@@ -105,10 +107,7 @@ function callbackify(originalMethod: typeof CallbackMethod) {
 
     const cb = Array.prototype.pop.call(arguments);
 
-    console.log('cb.name', cb.name);
-    const span = startTrace(
-      'cloud.google.com/nodejs/Spanner.' + cb.name + '.callbackify'
-    );
+    const span = startTrace('Spanner.' + cb.name);
     originalMethod.apply(this, arguments).then(
       // tslint:disable-next-line:no-any
       (res: any) => {
@@ -186,9 +185,8 @@ export function promisify(
   const slice = Array.prototype.slice;
 
   const wrapper: any = function (this: typeof WithPromise) {
-    const span = startTrace(
-      'cloud.google.com/nodejs/Spanner.' + originalMethod.name + '.promisify'
-    );
+    const span = startTrace('Spanner.' + originalMethod.name);
+
     // tslint:disable-next-line:no-any
     let last;
 

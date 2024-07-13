@@ -236,7 +236,7 @@ export class Session extends common.GrpcServiceObject {
         optionsOrCallback: CreateSessionOptions | CreateSessionCallback,
         callback: CreateSessionCallback
       ) => {
-        const span = startTrace('cloud.google.com/nodejs/Session.create');
+        const span = startTrace('Session.create');
         const options =
           typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
         callback =
@@ -379,7 +379,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | GetSessionMetadataCallback,
     cb?: GetSessionMetadataCallback
   ): void | Promise<GetSessionMetadataResponse> {
-    const span = startTrace('cloud.google.com/nodejs/Session.getMetadata');
+    const span = startTrace('Session.getMetadata');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -441,7 +441,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | KeepAliveCallback,
     cb?: KeepAliveCallback
   ): void | Promise<KeepAliveResponse> {
-    const span = startTrace('cloud.google.com/nodejs/Session.keepAlive');
+    const span = startTrace('Session.keepAlive');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =

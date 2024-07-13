@@ -42,9 +42,11 @@ function exportSpans(instanceId, databaseId, projectId) {
     })
   );
 
-  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
   const options = {serviceName: 'nodejs-spanner'};
-  const exporter = new ZipkinExporter(options);
+  const {
+    TraceExporter,
+  } = require('@google-cloud/opentelemetry-cloud-trace-exporter');
+  const exporter = new TraceExporter({});
 
   const sdk = new NodeSDK({
     resource: resource,
@@ -55,11 +57,10 @@ function exportSpans(instanceId, databaseId, projectId) {
   });
   sdk.start();
 
-  const {OTTracePropagator} = require('@opentelemetry/propagator-ot-trace');
   const provider = new NodeTracerProvider({resource: resource});
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
   provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-  provider.register({propagator: new OTTracePropagator()});
+  provider.register();
 
   // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
   const tracer = trace.getTracer('nodejs-spanner');
@@ -120,7 +121,6 @@ function exportSpans(instanceId, databaseId, projectId) {
             span.end();
             spanner.close();
             setTimeout(() => {
-              exporter.forceFlush();
               console.log('finished delete and creation of the database');
             }, 8000);
           });
