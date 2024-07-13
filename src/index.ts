@@ -414,14 +414,23 @@ class Spanner extends GrpcService {
 
   /** Closes this Spanner client and cleans up all resources used by it. */
   close(): void {
-    this.clients_.forEach(c => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const client = c as any;
-      if (client.operationsClient && client.operationsClient.close) {
-        client.operationsClient.close();
+    const that = this; // Capture the original context before starting the tracing span.
+
+    console.log('Spanner.close()');
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Spanner.close',
+      span => {
+        this = that;
+        this.clients_.forEach(c => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const client = c as any;
+          if (client.operationsClient && client.operationsClient.close) {
+            client.operationsClient.close();
+          }
+          client.close();
+        });
       }
-      client.close();
-    });
+    );
   }
 
   /**
@@ -1345,9 +1354,12 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigOptions | GetInstanceConfigCallback,
     cb?: GetInstanceConfigCallback
   ): Promise<GetInstanceConfigResponse> | void {
+    const that = this; // Capture the original context before starting the tracing span.
+
     return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfig',
       span => {
+        this = that;
         const callback =
           typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
         const options =
@@ -1465,9 +1477,12 @@ class Spanner extends GrpcService {
       | GetInstanceConfigOperationsCallback,
     cb?: GetInstanceConfigOperationsCallback
   ): void | Promise<GetInstanceConfigOperationsResponse> {
+    const that = this; // Capture the original context before starting the tracing span.
+
     return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigOperations',
       span => {
+        this = that;
         const callback =
           typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
         const options =
@@ -1589,58 +1604,73 @@ class Spanner extends GrpcService {
    * @param {function} callback Callback function
    */
   prepareGapicRequest_(config, callback) {
-    this.auth.getProjectId((err, projectId) => {
-      if (err) {
-        callback(err);
-        return;
-      }
-      const clientName = config.client;
-      if (!this.clients_.has(clientName)) {
-        this.clients_.set(clientName, new v1[clientName](this.options));
-      }
-      const gaxClient = this.clients_.get(clientName)!;
-      let reqOpts = extend(true, {}, config.reqOpts);
-      reqOpts = replaceProjectIdToken(reqOpts, projectId!);
-      // It would have been preferable to replace the projectId already in the
-      // constructor of Spanner, but that is not possible as auth.getProjectId
-      // is an async method. This is therefore the first place where we have
-      // access to the value that should be used instead of the placeholder.
-      if (!this.projectIdReplaced_) {
-        this.projectId = replaceProjectIdToken(this.projectId, projectId!);
-        this.projectFormattedName_ = replaceProjectIdToken(
-          this.projectFormattedName_,
-          projectId!
-        );
-        this.instances_.forEach(instance => {
-          instance.formattedName_ = replaceProjectIdToken(
-            instance.formattedName_,
-            projectId!
-          );
-          instance.databases_.forEach(database => {
-            database.formattedName_ = replaceProjectIdToken(
-              database.formattedName_,
+    const that = this; // Capture the original context before starting the tracing span.
+
+    tracer.startActiveSpan(
+      'cloud.google.com/nodejs/spanner/Spanner.prepareGapicRequest',
+      span => {
+        this = that;
+
+        this.auth.getProjectId((err, projectId) => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            callback(err);
+            return;
+          }
+          const clientName = config.client;
+          if (!this.clients_.has(clientName)) {
+            this.clients_.set(clientName, new v1[clientName](this.options));
+          }
+          const gaxClient = this.clients_.get(clientName)!;
+          let reqOpts = extend(true, {}, config.reqOpts);
+          reqOpts = replaceProjectIdToken(reqOpts, projectId!);
+          // It would have been preferable to replace the projectId already in the
+          // constructor of Spanner, but that is not possible as auth.getProjectId
+          // is an async method. This is therefore the first place where we have
+          // access to the value that should be used instead of the placeholder.
+          if (!this.projectIdReplaced_) {
+            this.projectId = replaceProjectIdToken(this.projectId, projectId!);
+            this.projectFormattedName_ = replaceProjectIdToken(
+              this.projectFormattedName_,
               projectId!
             );
-          });
+            this.instances_.forEach(instance => {
+              instance.formattedName_ = replaceProjectIdToken(
+                instance.formattedName_,
+                projectId!
+              );
+              instance.databases_.forEach(database => {
+                database.formattedName_ = replaceProjectIdToken(
+                  database.formattedName_,
+                  projectId!
+                );
+              });
+            });
+            this.projectIdReplaced_ = true;
+          }
+          config.headers[CLOUD_RESOURCE_HEADER] = replaceProjectIdToken(
+            config.headers[CLOUD_RESOURCE_HEADER],
+            projectId!
+          );
+          const requestFn = gaxClient[config.method].bind(
+            gaxClient,
+            reqOpts,
+            // Add headers to `gaxOpts`
+            extend(true, {}, config.gaxOpts, {
+              otherArgs: {
+                headers: config.headers,
+              },
+            })
+          );
+          span.end();
+          callback(null, requestFn);
         });
-        this.projectIdReplaced_ = true;
       }
-      config.headers[CLOUD_RESOURCE_HEADER] = replaceProjectIdToken(
-        config.headers[CLOUD_RESOURCE_HEADER],
-        projectId!
-      );
-      const requestFn = gaxClient[config.method].bind(
-        gaxClient,
-        reqOpts,
-        // Add headers to `gaxOpts`
-        extend(true, {}, config.gaxOpts, {
-          otherArgs: {
-            headers: config.headers,
-          },
-        })
-      );
-      callback(null, requestFn);
-    });
+    );
   }
 
   /**

@@ -655,9 +655,12 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
+    const that = this; // Capture the original context before starting the tracing span.
+
     return tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
       span => {
+        this = that;
         if (typeof options === 'number') {
           options = {count: options};
         }
@@ -3149,10 +3152,10 @@ class Database extends common.GrpcServiceObject {
           }
 
           const release = () => {
-              span.end();
-              console.log('releasing from pool');
-              this.pool_.release(session!);
-          }
+            span.end();
+            console.log('releasing from pool');
+            this.pool_.release(session!);
+          };
 
           const runner = new TransactionRunner(
             session!,

@@ -1053,9 +1053,12 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | DeleteInstanceCallback,
     cb?: DeleteInstanceCallback
   ): void | Promise<DeleteInstanceResponse> {
+    const that = this; // Capture the original context before starting the tracing span.
+
     tracer.startActiveSpan(
       'cloud.google.com/nodejs/spanner/Instance.delete',
       span => {
+        this = that;
         const gaxOpts =
           typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
         const callback =
@@ -1065,7 +1068,7 @@ class Instance extends common.GrpcServiceObject {
           name: this.formattedName_,
         };
         Promise.all(
-          Array.from(this.databases_.values()).map(database => {
+          Array.from(that.databases_.values()).map(database => {
             return database.close();
           })
         )
@@ -1083,7 +1086,7 @@ class Instance extends common.GrpcServiceObject {
               (err, resp) => {
                 if (!err) {
                   // TODO: Create a sub-span about invoking instances_.delete
-                  this.parent.instances_.delete(this.id);
+                  this.parent.instances_.delete(that.id);
                 }
                 span.end();
                 callback!(err, resp!);

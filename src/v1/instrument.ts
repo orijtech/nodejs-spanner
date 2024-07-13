@@ -71,7 +71,7 @@ export function startTraceExport(exporter) {
  * @param {boolean} options.singular - Pass to the callback a single arg instead of an array.
  * @return {function} wrapped
  *
- * This code although modified for OpenTelemetry instrumentation, is copied from 
+ * This code although modified for OpenTelemetry instrumentation, is copied from
  * https://github.com/googleapis/nodejs-promisify/blob/main/src/index.ts
  */
 function callbackify(originalMethod: typeof CallbackMethod) {
@@ -123,7 +123,7 @@ function callbackify(originalMethod: typeof CallbackMethod) {
  * @param {module:common/service} Class - Service class.
  * @param {object=} options - Configuration object.
  *
- * This code although modified for OpenTelemetry instrumentation, is copied from 
+ * This code although modified for OpenTelemetry instrumentation, is copied from
  * https://github.com/googleapis/nodejs-promisify/blob/main/src/index.ts
  */
 export function callbackifyAll(
@@ -159,7 +159,7 @@ export function callbackifyAll(
  * @param {boolean} options.singular - Resolve the promise with single arg instead of an array.
  * @return {function} wrapped
  *
- * This code although modified for OpenTelemetry instrumentation, is copied from 
+ * This code although modified for OpenTelemetry instrumentation, is copied from
  * https://github.com/googleapis/nodejs-promisify/blob/main/src/index.ts
  */
 export function promisify(
@@ -250,7 +250,7 @@ export function promisify(
  * @param {module:common/service} Class - Service class.
  * @param {object=} options - Configuration object.
  *
- * This code although modified for OpenTelemetry instrumentation, is copied from 
+ * This code although modified for OpenTelemetry instrumentation, is copied from
  * https://github.com/googleapis/nodejs-promisify/blob/main/src/index.ts
  */
 // tslint:disable-next-line:variable-name

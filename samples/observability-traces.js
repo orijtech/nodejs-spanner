@@ -100,8 +100,8 @@ function exportSpans(instanceId, databaseId, projectId) {
           insertUsingDml(tracer, database, () => {
             console.log('main span.end');
             span.end();
+            spanner.close();
             setTimeout(() => {
-              spanner.close();
               exporter.forceFlush();
               console.log('finished delete and creation of the database');
             }, 8000);
