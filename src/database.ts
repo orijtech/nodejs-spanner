@@ -102,7 +102,7 @@ import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
 import {
-  startSpan,
+  startTrace,
   SPAN_CODE_ERROR,
   callbackifyAll,
   promisify,
@@ -655,7 +655,7 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Database.batchCreateSessions'
     );
 
@@ -2030,7 +2030,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | GetSnapshotCallback,
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Database.getSnapshot'
     );
     console.log(`span: ${span}`);
@@ -3106,7 +3106,7 @@ class Database extends common.GrpcServiceObject {
     fn?: RunTransactionCallback
   ): void {
     console.log('database.runTransaction', fn);
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Database.runTransaction'
     );
     const runFn =
@@ -3357,7 +3357,7 @@ class Database extends common.GrpcServiceObject {
     mutationGroups: MutationGroup[],
     options?: BatchWriteOptions
   ): NodeJS.ReadableStream {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Database.batchWriteAtLeastOnce'
     );
     const proxyStream: Transform = through.obj();

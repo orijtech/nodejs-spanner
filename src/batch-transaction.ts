@@ -24,7 +24,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
-import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;
@@ -125,7 +125,7 @@ class BatchTransaction extends Snapshot {
    * region_tag:spanner_batch_client
    */
   createQueryPartitions(query, callback) {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/BatchTransaction.createQueryPartitions'
     );
     if (is.string(query)) {
@@ -176,7 +176,7 @@ class BatchTransaction extends Snapshot {
    * @param {function} callback Callback function.
    */
   createPartitions_(config, callback) {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/BatchTransaction.createPartitions'
     );
     const query = extend({}, config.reqOpts, {
@@ -248,7 +248,7 @@ class BatchTransaction extends Snapshot {
    * @returns {Promise<CreateReadPartitionsResponse>}
    */
   createReadPartitions(options, callback) {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/BatchTransaction.createReadPartitions'
     );
     const reqOpts = Object.assign({}, options, {

@@ -44,7 +44,7 @@ import IQueryOptions = google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Database, Spanner} from '.';
 import ReadLockMode = google.spanner.v1.TransactionOptions.ReadWrite.ReadLockMode;
-import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type Rows = Array<Row | Json>;
 const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.retryinfo';
@@ -401,7 +401,9 @@ export class Snapshot extends EventEmitter {
     gaxOptionsOrCallback?: CallOptions | BeginTransactionCallback,
     cb?: BeginTransactionCallback
   ): void | Promise<BeginResponse> {
-    const span = startSpan('cloud.google.com/nodejs/spanner/Transaction.begin');
+    const span = startTrace(
+      'cloud.google.com/nodejs/spanner/Transaction.begin'
+    );
     const gaxOpts =
       typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
     const callback =
@@ -905,7 +907,7 @@ export class Snapshot extends EventEmitter {
     requestOrCallback: ReadRequest | ReadCallback,
     cb?: ReadCallback
   ): void | Promise<ReadResponse> {
-    const span = startSpan('cloud.google.com/nodejs/spanner/Transaction.read');
+    const span = startTrace('cloud.google.com/nodejs/spanner/Transaction.read');
     const rows: Rows = [];
 
     let request: ReadRequest;
@@ -925,7 +927,7 @@ export class Snapshot extends EventEmitter {
           code: SPAN_CODE_ERROR,
           message: err.toString(),
         });
-        callback!(err, null);
+        callback!(err as grpc.ServiceError, null);
       })
       .on('data', row => rows.push(row))
       .on('end', () => {
@@ -1017,7 +1019,7 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
-    const span = startSpan('cloud.google.com/nodejs/spanner/Transaction.run');
+    const span = startTrace('cloud.google.com/nodejs/spanner/Transaction.run');
     const rows: Rows = [];
     let stats: google.spanner.v1.ResultSetStats;
     let metadata: google.spanner.v1.ResultSetMetadata;
@@ -1147,7 +1149,7 @@ export class Snapshot extends EventEmitter {
    * ```
    */
   runStream(query: string | ExecuteSqlRequest): PartialResultStream {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Transaction.runStream'
     );
     if (typeof query === 'string') {
@@ -1556,7 +1558,7 @@ export class Dml extends Snapshot {
     query: string | ExecuteSqlRequest,
     callback?: RunUpdateCallback
   ): void | Promise<RunUpdateResponse> {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Transaction.runUpdate'
     );
     if (typeof query === 'string') {
@@ -1787,7 +1789,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: BatchUpdateOptions | CallOptions | BatchUpdateCallback,
     cb?: BatchUpdateCallback
   ): Promise<BatchUpdateResponse> | void {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Transaction.batchUpdate'
     );
     const options =
@@ -2009,7 +2011,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: CommitOptions | CallOptions | CommitCallback,
     cb?: CommitCallback
   ): void | Promise<CommitResponse> {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Transaction.commit'
     );
     const options =
@@ -2373,7 +2375,7 @@ export class Transaction extends Dml {
       | spannerClient.spanner.v1.Spanner.RollbackCallback,
     cb?: spannerClient.spanner.v1.Spanner.RollbackCallback
   ): void | Promise<void> {
-    const span = startSpan(
+    const span = startTrace(
       'cloud.google.com/nodejs/spanner/Transaction.rollback'
     );
     const gaxOpts =

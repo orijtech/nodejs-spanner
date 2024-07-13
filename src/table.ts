@@ -30,7 +30,7 @@ import {
 import {google as databaseAdmin} from '../protos/protos';
 import {Schema, LongRunningCallback} from './common';
 import IRequestOptions = databaseAdmin.spanner.v1.IRequestOptions;
-import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type Key = string | string[];
 
@@ -1072,7 +1072,7 @@ class Table {
     options: MutateRowsOptions | CallOptions = {},
     callback: CommitCallback
   ): void {
-    const span = startSpan('cloud.google.com/nodejs/spanner/Table.' + method);
+    const span = startTrace('cloud.google.com/nodejs/spanner/Table.' + method);
     const requestOptions =
       'requestOptions' in options ? options.requestOptions : {};
 

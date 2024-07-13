@@ -43,7 +43,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
-import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startTrace, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 
@@ -236,7 +236,7 @@ export class Session extends common.GrpcServiceObject {
         optionsOrCallback: CreateSessionOptions | CreateSessionCallback,
         callback: CreateSessionCallback
       ) => {
-        const span = startSpan('cloud.google.com/nodejs/Session.create');
+        const span = startTrace('cloud.google.com/nodejs/Session.create');
         const options =
           typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
         callback =
@@ -382,7 +382,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | GetSessionMetadataCallback,
     cb?: GetSessionMetadataCallback
   ): void | Promise<GetSessionMetadataResponse> {
-    const span = startSpan('cloud.google.com/nodejs/Session.getMetadata');
+    const span = startTrace('cloud.google.com/nodejs/Session.getMetadata');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -447,7 +447,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | KeepAliveCallback,
     cb?: KeepAliveCallback
   ): void | Promise<KeepAliveResponse> {
-    const span = startSpan('cloud.google.com/nodejs/Session.keepAlive');
+    const span = startTrace('cloud.google.com/nodejs/Session.keepAlive');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
