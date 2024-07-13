@@ -88,6 +88,8 @@ rows.forEach(row => console.log(row));
 This package has been instrumented with [OpenTelemetry](https://opentelemetry.io/docs/languages/js/) for tracing. Make sure to firstly import and enable
 OpenTelemetry before importing this Spanner library.
 
+> :warning: **Make sure that the OpenTelemetry imports are the first before importing the Spanner library**
+
 To test out trace examination, you can use the Zipkin tracing service like this.
 
 ```javascript
