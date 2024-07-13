@@ -38,7 +38,7 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './spanner_client_config.json';
 const version = require('../../../package.json').version;
 
-import {tracer, SPAN_CODE_ERROR} from './instrument';
+import {startSpan, SPAN_CODE_ERROR} from './instrument';
 
 /**
  *  Cloud Spanner API
@@ -156,28 +156,22 @@ export class SpannerClient {
 
     // Load google-gax module synchronously if needed
     if (!gaxInstance) {
-      gaxInstance = tracer.startActiveSpan(
-        'cloud.google.com/nodejs/spanner/SpannerClient.loadGax',
-        span => {
-          const result = require('google-gax') as typeof gax;
-          span.end();
-          return result;
-        }
+      const span = startSpan(
+        'cloud.google.com/nodejs/spanner/SpannerClient.loadGax'
       );
+      gaxInstance = require('google-gax') as typeof gax;
+      span.end();
     }
 
     // Choose either gRPC or proto-over-HTTP implementation of google-gax.
     this._gaxModule = opts.fallback ? gaxInstance.fallback : gaxInstance;
 
     // Create a `gaxGrpc` object, with any grpc-specific options sent to the client.
-    this._gaxGrpc = tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.newGrpcClient',
-      span => {
-        const value = new this._gaxModule.GrpcClient(opts);
-        span.end();
-        return value;
-      }
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.newGrpcClient'
     );
+    this._gaxGrpc = new this._gaxModule.GrpcClient(opts);
+    span.end();
 
     // Save options to use in initialize() method.
     this._opts = opts;
@@ -325,73 +319,72 @@ export class SpannerClient {
       'batchWrite',
     ];
     for (const methodName of spannerStubMethods) {
-      const spanName =
-        'cloud.google.com/nodejs/spanner/SpannerClient.' + methodName;
       const callPromise = this.spannerStub.then(
         stub =>
           (...args: Array<{}>) => {
-            return tracer.startActiveSpan(spanName, span => {
-              const msg = 'The client has already been closed';
-              if (this._terminated) {
-                if (methodName in this.descriptors.stream) {
-                  const stream = new PassThrough();
-                  setImmediate(() => {
+            const spanName =
+              'cloud.google.com/nodejs/spanner/SpannerClient.' + methodName;
+            const span = startSpan(spanName);
+            const msg = 'The client has already been closed';
+            if (this._terminated) {
+              if (methodName in this.descriptors.stream) {
+                const stream = new PassThrough();
+                setImmediate(() => {
+                  span.setStatus({
+                    code: SPAN_CODE_ERROR,
+                    message: msg,
+                  });
+                  stream.emit('error', new this._gaxModule.GoogleError(msg));
+                  span.end();
+                });
+
+                finished(stream, err => {
+                  if (err) {
                     span.setStatus({
                       code: SPAN_CODE_ERROR,
-                      message: msg,
+                      message: err.toString(),
                     });
-                    stream.emit('error', new this._gaxModule.GoogleError(msg));
-                    span.end();
-                  });
-
-                  finished(stream, err => {
-                    if (err) {
-                      span.setStatus({
-                        code: SPAN_CODE_ERROR,
-                        message: err.toString(),
-                      });
-                    }
-                    span.end();
-                  });
-                  return stream;
-                }
-
-                span.end();
-                return Promise.reject(msg);
+                  }
+                  span.end();
+                });
+                return stream;
               }
 
-              // In this path, the client hasn't yet been terminated.
-              const func = stub[methodName];
-              const call = func.apply(stub, args);
+              span.end();
+              return Promise.reject(msg);
+            }
 
-              // TODO: Add a custom interface implementation check.
-              // Retrieve all the already set 'end' event listeners and
-              // add our span.end() invocation as the last one.
-              const priorEndListeners = call.listeners('end');
-              call.on('end', () => {
-                priorEndListeners.forEach(fn => {
-                  fn();
-                });
-                span.end();
+            // In this path, the client hasn't yet been terminated.
+            const func = stub[methodName];
+            const call = func.apply(stub, args);
+
+            // TODO: Add a custom interface implementation check.
+            // Retrieve all the already set 'end' event listeners and
+            // add our span.end() invocation as the last one.
+            const priorEndListeners = call.listeners('end');
+            call.on('end', () => {
+              priorEndListeners.forEach(fn => {
+                fn();
               });
-
-              // Override the 'error' event listeners and then
-              // set our span.setError for the call.
-              const priorErrListeners = call.listeners('error');
-              call.on('error', err => {
-                priorErrListeners.forEach(fn => {
-                  fn(err);
-                });
-
-                span.setStatus({
-                  code: SPAN_CODE_ERROR,
-                  message: err.toString(),
-                });
-                span.end();
-              });
-
-              return call;
+              span.end();
             });
+
+            // Override the 'error' event listeners and then
+            // set our span.setError for the call.
+            const priorErrListeners = call.listeners('error');
+            call.on('error', err => {
+              priorErrListeners.forEach(fn => {
+                fn(err);
+              });
+
+              span.setStatus({
+                code: SPAN_CODE_ERROR,
+                message: err.toString(),
+              });
+              span.end();
+            });
+
+            return call;
           },
         (err: Error | null | undefined) => () => {
           // TODO: retrieve the active span and end it.
@@ -2491,21 +2484,19 @@ export class SpannerClient {
    * @returns {Promise} A promise that resolves when the client is closed.
    */
   close(): Promise<void> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.close',
-      span => {
-        if (this.spannerStub && !this._terminated) {
-          return this.spannerStub.then(stub => {
-            this._terminated = true;
-            stub.close();
-            span.end();
-          });
-        }
-        span.setAttribute('already_closed', true);
-        const value = Promise.resolve();
-        span.end();
-        return value;
-      }
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.close'
     );
+    if (this.spannerStub && !this._terminated) {
+      return this.spannerStub.then(stub => {
+        this._terminated = true;
+        stub.close();
+        span.end();
+      });
+    }
+    span.setAttribute('already_closed', true);
+    const value = Promise.resolve();
+    span.end();
+    return value;
   }
 }

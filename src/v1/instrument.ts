@@ -30,7 +30,7 @@ const {
   WithPromise,
 } = require('@google-cloud/promisify');
 
-import {trace} from '@opentelemetry/api';
+import {context, trace} from '@opentelemetry/api';
 // TODO: Infer the tracer from either the provided context or globally.
 const tracer = trace.getTracer('nodejs-spanner');
 const SPAN_CODE_ERROR = SpanStatusCode.ERROR;
@@ -88,12 +88,8 @@ function callbackify(originalMethod: typeof CallbackMethod) {
     const cb = Array.prototype.pop.call(arguments);
 
     console.log('cb.name', cb.name);
-    const that = this;
-
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/Spanner.' + cb.name + '.callbackify',
-      span => {
-        originalMethod.apply(that, arguments).then(
+    const span = startSpan('cloud.google.com/nodejs/Spanner.' + cb.name + '.callbackify');
+        originalMethod.apply(this, arguments).then(
           // tslint:disable-next-line:no-any
           (res: any) => {
             res = Array.isArray(res) ? res : [res];
@@ -109,8 +105,6 @@ function callbackify(originalMethod: typeof CallbackMethod) {
             cb(err);
           }
         );
-      }
-    );
   };
   wrapper.callbackified_ = true;
   return wrapper;
@@ -175,11 +169,7 @@ export function promisify(
   const slice = Array.prototype.slice;
 
   const wrapper: any = function (this: typeof WithPromise) {
-    const that = this;
-
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/Spanner.' + originalMethod.name + '.promisify',
-      span => {
+    const span = startSpan('cloud.google.com/nodejs/Spanner.' + originalMethod.name + '.promisify');
         // tslint:disable-next-line:no-any
         let last;
 
@@ -194,7 +184,7 @@ export function promisify(
             break; // non-callback last argument found.
           }
 
-          return originalMethod.apply(that, arguments);
+          return originalMethod.apply(this, arguments);
         }
 
         // peel trailing undefined.
@@ -206,8 +196,8 @@ export function promisify(
         // Because dedupe will likely create a single install of
         // @google-cloud/common to be shared amongst all modules, we need to
         // localize it at the Service level.
-        if (that && that.Promise) {
-          PromiseCtor = that.Promise;
+        if (this && this.Promise) {
+          PromiseCtor = this.Promise;
         }
 
         return new PromiseCtor((resolve, reject) => {
@@ -233,7 +223,7 @@ export function promisify(
             }
           });
 
-          originalMethod.apply(that, args);
+          originalMethod.apply(this, args);
         });
       }
     );
@@ -276,4 +266,14 @@ export function promisifyAll(
       Class.prototype[methodName] = exports.promisify(originalMethod, options);
     }
   });
+}
+
+// startSpan synchronously returns a span to avoid the dramatic
+// scope change in which trying to use tracer.startActiveSpan 
+// would change the meaning of this, and also introduction of callbacks
+// would radically change all the code structures making it more invasive.
+export function startSpan(spanName): Span {
+  const span = tracer.startSpan(spanName);
+  const ctx = trace.setSpan(context.active(), span);
+  return span;
 }

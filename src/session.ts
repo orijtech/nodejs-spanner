@@ -43,7 +43,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
-import {promisifyAll, tracer, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 
@@ -236,40 +236,33 @@ export class Session extends common.GrpcServiceObject {
         optionsOrCallback: CreateSessionOptions | CreateSessionCallback,
         callback: CreateSessionCallback
       ) => {
-        return tracer.startActiveSpan(
-          'cloud.google.com/nodejs/Session.create',
-          span => {
-            const options =
-              typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-            callback =
-              typeof optionsOrCallback === 'function'
-                ? optionsOrCallback
-                : callback;
+        const span = startSpan('cloud.google.com/nodejs/Session.create');
+        const options =
+          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+        callback =
+          typeof optionsOrCallback === 'function'
+            ? optionsOrCallback
+            : callback;
 
-            this.labels = options.labels || null;
-            this.databaseRole =
-              options.databaseRole || database.databaseRole || null;
+        this.labels = options.labels || null;
+        this.databaseRole =
+          options.databaseRole || database.databaseRole || null;
 
-            return database.createSession(
-              options,
-              (err, session, apiResponse) => {
-                if (err) {
-                  span.setStatus({
-                    code: SPAN_CODE_ERROR,
-                    message: err.toString(),
-                  });
-                  span.end();
-                  callback(err, null, apiResponse);
-                  return;
-                }
-
-                extend(this, session);
-                span.end();
-                callback(null, this, apiResponse);
-              }
-            );
+        return database.createSession(options, (err, session, apiResponse) => {
+          if (err) {
+            span.setStatus({
+              code: SPAN_CODE_ERROR,
+              message: err.toString(),
+            });
+            span.end();
+            callback(err, null, apiResponse);
+            return;
           }
-        );
+
+          extend(this, session);
+          span.end();
+          callback(null, this, apiResponse);
+        });
       },
     } as {} as ServiceObjectConfig);
 
@@ -389,47 +382,43 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | GetSessionMetadataCallback,
     cb?: GetSessionMetadataCallback
   ): void | Promise<GetSessionMetadataResponse> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/Session.getMetadata',
-      span => {
-        const gaxOpts =
-          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    const span = startSpan('cloud.google.com/nodejs/Session.getMetadata');
+    const gaxOpts =
+      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-        const reqOpts = {
-          name: this.formattedName_,
-        };
+    const reqOpts = {
+      name: this.formattedName_,
+    };
 
-        const headers = this.resourceHeader_;
-        if (this._getSpanner().routeToLeaderEnabled) {
-          addLeaderAwareRoutingHeader(headers);
+    const headers = this.resourceHeader_;
+    if (this._getSpanner().routeToLeaderEnabled) {
+      addLeaderAwareRoutingHeader(headers);
+    }
+    return this.request(
+      {
+        client: 'SpannerClient',
+        method: 'getSession',
+        reqOpts,
+        gaxOpts,
+        headers: headers,
+      },
+      (err, resp) => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
         }
-        return this.request(
-          {
-            client: 'SpannerClient',
-            method: 'getSession',
-            reqOpts,
-            gaxOpts,
-            headers: headers,
-          },
-          (err, resp) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
 
-            if (resp) {
-              resp.databaseRole = resp.creatorRole;
-              delete resp.creatorRole;
-              this.metadata = resp;
-            }
-            span.end();
-            callback!(err, resp);
-          }
-        );
+        if (resp) {
+          resp.databaseRole = resp.creatorRole;
+          delete resp.creatorRole;
+          this.metadata = resp;
+        }
+        span.end();
+        callback!(err, resp);
       }
     );
   }
@@ -458,37 +447,33 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | KeepAliveCallback,
     cb?: KeepAliveCallback
   ): void | Promise<KeepAliveResponse> {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/Session.keepAlive',
-      span => {
-        const gaxOpts =
-          typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    const span = startSpan('cloud.google.com/nodejs/Session.keepAlive');
+    const gaxOpts =
+      typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
 
-        const reqOpts = {
-          session: this.formattedName_,
-          sql: 'SELECT 1',
-        };
-        return this.request(
-          {
-            client: 'SpannerClient',
-            method: 'executeSql',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          err => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-            span.end();
-            callback!(err);
-          }
-        );
+    const reqOpts = {
+      session: this.formattedName_,
+      sql: 'SELECT 1',
+    };
+    return this.request(
+      {
+        client: 'SpannerClient',
+        method: 'executeSql',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      err => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+        }
+        span.end();
+        callback!(err);
       }
     );
   }

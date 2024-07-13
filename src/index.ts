@@ -79,7 +79,7 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
-import {promisifyAll, tracer, SPAN_CODE_ERROR} from './v1/instrument';
+import {promisifyAll, startSpan, SPAN_CODE_ERROR} from './v1/instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');
@@ -414,23 +414,15 @@ class Spanner extends GrpcService {
 
   /** Closes this Spanner client and cleans up all resources used by it. */
   close(): void {
-    const that = this; // Capture the original context before starting the tracing span.
-
-    console.log('Spanner.close()');
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Spanner.close',
-      span => {
-        this = that;
-        this.clients_.forEach(c => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const client = c as any;
-          if (client.operationsClient && client.operationsClient.close) {
-            client.operationsClient.close();
-          }
-          client.close();
-        });
+    const span = startSpan('cloud.google.com/nodejs/spanner/Spanner.close');
+    this.clients_.forEach(c => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client = c as any;
+      if (client.operationsClient && client.operationsClient.close) {
+        client.operationsClient.close();
       }
-    );
+      client.close();
+    });
   }
 
   /**
@@ -536,95 +528,87 @@ class Spanner extends GrpcService {
     config: CreateInstanceRequest,
     callback?: CreateInstanceCallback
   ): void | Promise<CreateInstanceResponse> {
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.createInstance',
-      span => {
-        if (!name) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: 'A name is required to create an instance',
-          });
-          span.end();
-          throw new GoogleError('A name is required to create an instance.');
-        }
-        if (!config) {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: 'A configuration object is required to create an instance',
-          });
-          span.end();
-          throw new GoogleError(
-            ['A configuration object is required to create an instance.'].join(
-              ''
-            )
-          );
-        }
-        const formattedName = Instance.formatName_(this.projectId, name);
-        const displayName =
-          config.displayName || formattedName.split('/').pop();
-        const reqOpts = {
-          parent: this.projectFormattedName_,
-          instanceId: formattedName.split('/').pop(),
-          instance: extend(
-            {
-              name: formattedName,
-              displayName,
-              nodeCount: config.nodes,
-              processingUnits: config.processingUnits,
-            },
-            config
-          ),
-        };
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.createInstance'
+    );
+    if (!name) {
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: 'A name is required to create an instance',
+      });
+      span.end();
+      throw new GoogleError('A name is required to create an instance.');
+    }
+    if (!config) {
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: 'A configuration object is required to create an instance',
+      });
+      span.end();
+      throw new GoogleError(
+        ['A configuration object is required to create an instance.'].join('')
+      );
+    }
+    const formattedName = Instance.formatName_(this.projectId, name);
+    const displayName = config.displayName || formattedName.split('/').pop();
+    const reqOpts = {
+      parent: this.projectFormattedName_,
+      instanceId: formattedName.split('/').pop(),
+      instance: extend(
+        {
+          name: formattedName,
+          displayName,
+          nodeCount: config.nodes,
+          processingUnits: config.processingUnits,
+        },
+        config
+      ),
+    };
 
-        if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
+    if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: 'Only one of nodeCount or processingUnits can be specified',
+      });
+      span.end();
+      throw new GoogleError(
+        ['Only one of nodeCount or processingUnits can be specified.'].join('')
+      );
+    }
+    if (!reqOpts.instance.nodeCount && !reqOpts.instance.processingUnits) {
+      // If neither nodes nor processingUnits are specified, default to a
+      // nodeCount of 1.
+      reqOpts.instance.nodeCount = 1;
+    }
+
+    delete reqOpts.instance.nodes;
+    delete reqOpts.instance.gaxOptions;
+
+    if (config.config!.indexOf('/') === -1) {
+      reqOpts.instance.config = `projects/${this.projectId}/instanceConfigs/${config.config}`;
+    }
+    this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'createInstance',
+        reqOpts,
+        gaxOpts: config.gaxOptions,
+        headers: this.resourceHeader_,
+      },
+      (err, operation, resp) => {
+        if (err) {
           span.setStatus({
             code: SPAN_CODE_ERROR,
             message:
               'Only one of nodeCount or processingUnits can be specified',
           });
           span.end();
-          throw new GoogleError(
-            ['Only one of nodeCount or processingUnits can be specified.'].join(
-              ''
-            )
-          );
+          callback!(err, null, null, resp);
+          return;
         }
-        if (!reqOpts.instance.nodeCount && !reqOpts.instance.processingUnits) {
-          // If neither nodes nor processingUnits are specified, default to a
-          // nodeCount of 1.
-          reqOpts.instance.nodeCount = 1;
-        }
-
-        delete reqOpts.instance.nodes;
-        delete reqOpts.instance.gaxOptions;
-
-        if (config.config!.indexOf('/') === -1) {
-          reqOpts.instance.config = `projects/${this.projectId}/instanceConfigs/${config.config}`;
-        }
-        this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'createInstance',
-            reqOpts,
-            gaxOpts: config.gaxOptions,
-            headers: this.resourceHeader_,
-          },
-          (err, operation, resp) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message:
-                  'Only one of nodeCount or processingUnits can be specified',
-              });
-              span.end();
-              callback!(err, null, null, resp);
-              return;
-            }
-            const instance = this.instance(formattedName);
-            span.end();
-            callback!(null, instance, operation, resp);
-          }
-        );
+        const instance = this.instance(formattedName);
+        span.end();
+        callback!(null, instance, operation, resp);
       }
     );
   }
@@ -755,39 +739,37 @@ class Spanner extends GrpcService {
       delete (gaxOpts as GetInstancesOptions).pageSize;
     }
 
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstances',
-      span => {
-        this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'listInstances',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          (err, instances, nextPageRequest, ...args) => {
-            let instanceInstances: Instance[] | null = null;
-            if (instances) {
-              instanceInstances = instances.map(instance => {
-                const instanceInstance = self.instance(instance.name);
-                instanceInstance.metadata = instance;
-                return instanceInstance;
-              });
-            }
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-            const nextQuery = nextPageRequest!
-              ? extend({}, options, nextPageRequest!)
-              : null;
-            span.end();
-            callback!(err, instanceInstances, nextQuery, ...args);
-          }
-        );
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.getInstances'
+    );
+    this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'listInstances',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      (err, instances, nextPageRequest, ...args) => {
+        let instanceInstances: Instance[] | null = null;
+        if (instances) {
+          instanceInstances = instances.map(instance => {
+            const instanceInstance = self.instance(instance.name);
+            instanceInstance.metadata = instance;
+            return instanceInstance;
+          });
+        }
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+        }
+        const nextQuery = nextPageRequest!
+          ? extend({}, options, nextPageRequest!)
+          : null;
+        span.end();
+        callback!(err, instanceInstances, nextQuery, ...args);
       }
     );
   }
@@ -973,89 +955,86 @@ class Spanner extends GrpcService {
     config: CreateInstanceConfigRequest,
     callback?: CreateInstanceConfigCallback
   ): void | Promise<CreateInstanceConfigResponse> {
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.createInstanceConfig',
-      span => {
-        if (!name) {
-          const msg = 'A name is required to create an instance config.';
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.createInstanceConfig'
+    );
+    if (!name) {
+      const msg = 'A name is required to create an instance config.';
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: msg,
+      });
+      span.end();
+      throw new GoogleError(msg);
+    }
+    if (!config) {
+      const msg =
+        'A configuration object is required to create an instance config.';
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: msg,
+      });
+      span.end();
+      throw new GoogleError([msg].join(''));
+    }
+    if (!config.baseConfig) {
+      const msg =
+        'Base instance config is required to create an instance config.';
+      span.setStatus({
+        code: SPAN_CODE_ERROR,
+        message: msg,
+      });
+      span.end();
+      throw new GoogleError([msg].join(''));
+    }
+    const formattedName = InstanceConfig.formatName_(this.projectId, name);
+    const displayName = config.displayName || formattedName.split('/').pop();
+    const reqOpts = {
+      parent: this.projectFormattedName_,
+      instanceConfigId: formattedName.split('/').pop(),
+      instanceConfig: extend(
+        {
+          name: formattedName,
+          displayName,
+        },
+        config
+      ),
+      validateOnly: config.validateOnly,
+    };
+
+    if (config.baseConfig!.indexOf('/') === -1) {
+      reqOpts.instanceConfig.baseConfig = `projects/${this.projectId}/instanceConfigs/${config.baseConfig}`;
+    }
+
+    // validateOnly need not be passed in if it is null.
+    if (reqOpts.validateOnly === null || reqOpts.validateOnly === undefined)
+      delete reqOpts.validateOnly;
+
+    // validateOnly and gaxOptions are not fields in InstanceConfig.
+    delete reqOpts.instanceConfig.validateOnly;
+    delete reqOpts.instanceConfig.gaxOptions;
+
+    this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'createInstanceConfig',
+        reqOpts,
+        gaxOpts: config.gaxOptions,
+        headers: this.resourceHeader_,
+      },
+      (err, operation, resp) => {
+        if (err) {
           span.setStatus({
             code: SPAN_CODE_ERROR,
-            message: msg,
+            message: err.toString(),
           });
           span.end();
-          throw new GoogleError(msg);
+          callback!(err, null, null, resp);
+          return;
         }
-        if (!config) {
-          const msg =
-            'A configuration object is required to create an instance config.';
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: msg,
-          });
-          span.end();
-          throw new GoogleError([msg].join(''));
-        }
-        if (!config.baseConfig) {
-          const msg =
-            'Base instance config is required to create an instance config.';
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: msg,
-          });
-          span.end();
-          throw new GoogleError([msg].join(''));
-        }
-        const formattedName = InstanceConfig.formatName_(this.projectId, name);
-        const displayName =
-          config.displayName || formattedName.split('/').pop();
-        const reqOpts = {
-          parent: this.projectFormattedName_,
-          instanceConfigId: formattedName.split('/').pop(),
-          instanceConfig: extend(
-            {
-              name: formattedName,
-              displayName,
-            },
-            config
-          ),
-          validateOnly: config.validateOnly,
-        };
-
-        if (config.baseConfig!.indexOf('/') === -1) {
-          reqOpts.instanceConfig.baseConfig = `projects/${this.projectId}/instanceConfigs/${config.baseConfig}`;
-        }
-
-        // validateOnly need not be passed in if it is null.
-        if (reqOpts.validateOnly === null || reqOpts.validateOnly === undefined)
-          delete reqOpts.validateOnly;
-
-        // validateOnly and gaxOptions are not fields in InstanceConfig.
-        delete reqOpts.instanceConfig.validateOnly;
-        delete reqOpts.instanceConfig.gaxOptions;
-
-        this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'createInstanceConfig',
-            reqOpts,
-            gaxOpts: config.gaxOptions,
-            headers: this.resourceHeader_,
-          },
-          (err, operation, resp) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-              span.end();
-              callback!(err, null, null, resp);
-              return;
-            }
-            const instanceConfig = this.instanceConfig(formattedName);
-            span.end();
-            callback!(null, instanceConfig, operation, resp);
-          }
-        );
+        const instanceConfig = this.instanceConfig(formattedName);
+        span.end();
+        callback!(null, instanceConfig, operation, resp);
       }
     );
   }
@@ -1156,61 +1135,59 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigsOptions | GetInstanceConfigsCallback,
     cb?: GetInstanceConfigsCallback
   ): Promise<GetInstanceConfigsResponse> | void {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigs',
-      span => {
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
-        const options =
-          typeof optionsOrCallback === 'object'
-            ? optionsOrCallback
-            : ({} as GetInstanceConfigsOptions);
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigs'
+    );
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
+    const options =
+      typeof optionsOrCallback === 'object'
+        ? optionsOrCallback
+        : ({} as GetInstanceConfigsOptions);
 
-        const gaxOpts = extend(true, {}, options.gaxOptions);
-        let reqOpts = extend({}, options, {
-          parent: 'projects/' + this.projectId,
-        });
-        delete reqOpts.gaxOptions;
+    const gaxOpts = extend(true, {}, options.gaxOptions);
+    let reqOpts = extend({}, options, {
+      parent: 'projects/' + this.projectId,
+    });
+    delete reqOpts.gaxOptions;
 
-        // Copy over pageSize and pageToken values from gaxOptions.
-        // However values set on options take precedence.
-        if (gaxOpts) {
-          // TODO: Annotate the span with the pageSize and pageToken values.
-          reqOpts = extend(
-            {},
-            {
-              pageSize: (gaxOpts as GetInstanceConfigsOptions).pageSize,
-              pageToken: (gaxOpts as GetInstanceConfigsOptions).pageToken,
-            },
-            reqOpts
-          );
-          delete (gaxOpts as GetInstanceConfigsOptions).pageSize;
-          delete (gaxOpts as GetInstanceConfigsOptions).pageToken;
+    // Copy over pageSize and pageToken values from gaxOptions.
+    // However values set on options take precedence.
+    if (gaxOpts) {
+      // TODO: Annotate the span with the pageSize and pageToken values.
+      reqOpts = extend(
+        {},
+        {
+          pageSize: (gaxOpts as GetInstanceConfigsOptions).pageSize,
+          pageToken: (gaxOpts as GetInstanceConfigsOptions).pageToken,
+        },
+        reqOpts
+      );
+      delete (gaxOpts as GetInstanceConfigsOptions).pageSize;
+      delete (gaxOpts as GetInstanceConfigsOptions).pageToken;
+    }
+
+    return this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'listInstanceConfigs',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      (err, instanceConfigs, nextPageRequest, ...args) => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
         }
 
-        return this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'listInstanceConfigs',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          (err, instanceConfigs, nextPageRequest, ...args) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-
-            const nextQuery = nextPageRequest!
-              ? extend({}, options, nextPageRequest!)
-              : null;
-            span.end();
-            callback!(err, instanceConfigs, nextQuery, ...args);
-          }
-        );
+        const nextQuery = nextPageRequest!
+          ? extend({}, options, nextPageRequest!)
+          : null;
+        span.end();
+        callback!(err, instanceConfigs, nextQuery, ...args);
       }
     );
   }
@@ -1354,46 +1331,41 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigOptions | GetInstanceConfigCallback,
     cb?: GetInstanceConfigCallback
   ): Promise<GetInstanceConfigResponse> | void {
-    const that = this; // Capture the original context before starting the tracing span.
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfig'
+    );
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
+    const options =
+      typeof optionsOrCallback === 'object'
+        ? optionsOrCallback
+        : ({} as GetInstanceConfigOptions);
 
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfig',
-      span => {
-        this = that;
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
-        const options =
-          typeof optionsOrCallback === 'object'
-            ? optionsOrCallback
-            : ({} as GetInstanceConfigOptions);
+    const reqOpts = extend(
+      {},
+      {
+        name: 'projects/' + this.projectId + '/instanceConfigs/' + name,
+      }
+    );
+    const gaxOpts = extend({}, options.gaxOptions);
 
-        const reqOpts = extend(
-          {},
-          {
-            name: 'projects/' + this.projectId + '/instanceConfigs/' + name,
-          }
-        );
-        const gaxOpts = extend({}, options.gaxOptions);
-
-        return this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'getInstanceConfig',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          (err, instanceConfig) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-            span.end();
-            callback!(err, instanceConfig);
-          }
-        );
+    return this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'getInstanceConfig',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      (err, instanceConfig) => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+        }
+        span.end();
+        callback!(err, instanceConfig);
       }
     );
   }
@@ -1477,65 +1449,58 @@ class Spanner extends GrpcService {
       | GetInstanceConfigOperationsCallback,
     cb?: GetInstanceConfigOperationsCallback
   ): void | Promise<GetInstanceConfigOperationsResponse> {
-    const that = this; // Capture the original context before starting the tracing span.
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigOperations'
+    );
+    const callback =
+      typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
+    const options =
+      typeof optionsOrCallback === 'object'
+        ? optionsOrCallback
+        : ({} as GetInstanceConfigOperationsOptions);
+    const gaxOpts = extend(true, {}, options.gaxOptions);
+    let reqOpts = extend({}, options, {
+      parent: this.projectFormattedName_,
+    });
+    delete reqOpts.gaxOptions;
 
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/SpannerClient.getInstanceConfigOperations',
-      span => {
-        this = that;
-        const callback =
-          typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
-        const options =
-          typeof optionsOrCallback === 'object'
-            ? optionsOrCallback
-            : ({} as GetInstanceConfigOperationsOptions);
-        const gaxOpts = extend(true, {}, options.gaxOptions);
-        let reqOpts = extend({}, options, {
-          parent: this.projectFormattedName_,
-        });
-        delete reqOpts.gaxOptions;
+    // Copy over pageSize and pageToken values from gaxOptions.
+    // However, values set on options take precedence.
+    if (gaxOpts) {
+      reqOpts = extend(
+        {},
+        {
+          pageSize: (gaxOpts as GetInstanceConfigOperationsOptions).pageSize,
+          pageToken: (gaxOpts as GetInstanceConfigOperationsOptions).pageToken,
+        },
+        reqOpts
+      );
+      delete (gaxOpts as GetInstanceConfigOperationsOptions).pageSize;
+      delete (gaxOpts as GetInstanceConfigOperationsOptions).pageToken;
+    }
 
-        // Copy over pageSize and pageToken values from gaxOptions.
-        // However, values set on options take precedence.
-        if (gaxOpts) {
-          reqOpts = extend(
-            {},
-            {
-              pageSize: (gaxOpts as GetInstanceConfigOperationsOptions)
-                .pageSize,
-              pageToken: (gaxOpts as GetInstanceConfigOperationsOptions)
-                .pageToken,
-            },
-            reqOpts
-          );
-          delete (gaxOpts as GetInstanceConfigOperationsOptions).pageSize;
-          delete (gaxOpts as GetInstanceConfigOperationsOptions).pageToken;
+    this.request(
+      {
+        client: 'InstanceAdminClient',
+        method: 'listInstanceConfigOperations',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      },
+      (err, operations, nextPageRequest, ...args) => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
         }
 
-        this.request(
-          {
-            client: 'InstanceAdminClient',
-            method: 'listInstanceConfigOperations',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          },
-          (err, operations, nextPageRequest, ...args) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
+        const nextQuery = nextPageRequest!
+          ? extend({}, options, nextPageRequest!)
+          : null;
 
-            const nextQuery = nextPageRequest!
-              ? extend({}, options, nextPageRequest!)
-              : null;
-
-            span.end();
-            callback!(err, operations, nextQuery, ...args);
-          }
-        );
+        span.end();
+        callback!(err, operations, nextQuery, ...args);
       }
     );
   }
@@ -1604,73 +1569,67 @@ class Spanner extends GrpcService {
    * @param {function} callback Callback function
    */
   prepareGapicRequest_(config, callback) {
-    const that = this; // Capture the original context before starting the tracing span.
-
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Spanner.prepareGapicRequest',
-      span => {
-        this = that;
-
-        this.auth.getProjectId((err, projectId) => {
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
-            span.end();
-            callback(err);
-            return;
-          }
-          const clientName = config.client;
-          if (!this.clients_.has(clientName)) {
-            this.clients_.set(clientName, new v1[clientName](this.options));
-          }
-          const gaxClient = this.clients_.get(clientName)!;
-          let reqOpts = extend(true, {}, config.reqOpts);
-          reqOpts = replaceProjectIdToken(reqOpts, projectId!);
-          // It would have been preferable to replace the projectId already in the
-          // constructor of Spanner, but that is not possible as auth.getProjectId
-          // is an async method. This is therefore the first place where we have
-          // access to the value that should be used instead of the placeholder.
-          if (!this.projectIdReplaced_) {
-            this.projectId = replaceProjectIdToken(this.projectId, projectId!);
-            this.projectFormattedName_ = replaceProjectIdToken(
-              this.projectFormattedName_,
-              projectId!
-            );
-            this.instances_.forEach(instance => {
-              instance.formattedName_ = replaceProjectIdToken(
-                instance.formattedName_,
-                projectId!
-              );
-              instance.databases_.forEach(database => {
-                database.formattedName_ = replaceProjectIdToken(
-                  database.formattedName_,
-                  projectId!
-                );
-              });
-            });
-            this.projectIdReplaced_ = true;
-          }
-          config.headers[CLOUD_RESOURCE_HEADER] = replaceProjectIdToken(
-            config.headers[CLOUD_RESOURCE_HEADER],
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/Spanner.prepareGapicRequest'
+    );
+    this.auth.getProjectId((err, projectId) => {
+      if (err) {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
+        });
+        span.end();
+        callback(err);
+        return;
+      }
+      const clientName = config.client;
+      if (!this.clients_.has(clientName)) {
+        this.clients_.set(clientName, new v1[clientName](this.options));
+      }
+      const gaxClient = this.clients_.get(clientName)!;
+      let reqOpts = extend(true, {}, config.reqOpts);
+      reqOpts = replaceProjectIdToken(reqOpts, projectId!);
+      // It would have been preferable to replace the projectId already in the
+      // constructor of Spanner, but that is not possible as auth.getProjectId
+      // is an async method. This is therefore the first place where we have
+      // access to the value that should be used instead of the placeholder.
+      if (!this.projectIdReplaced_) {
+        this.projectId = replaceProjectIdToken(this.projectId, projectId!);
+        this.projectFormattedName_ = replaceProjectIdToken(
+          this.projectFormattedName_,
+          projectId!
+        );
+        this.instances_.forEach(instance => {
+          instance.formattedName_ = replaceProjectIdToken(
+            instance.formattedName_,
             projectId!
           );
-          const requestFn = gaxClient[config.method].bind(
-            gaxClient,
-            reqOpts,
-            // Add headers to `gaxOpts`
-            extend(true, {}, config.gaxOpts, {
-              otherArgs: {
-                headers: config.headers,
-              },
-            })
-          );
-          span.end();
-          callback(null, requestFn);
+          instance.databases_.forEach(database => {
+            database.formattedName_ = replaceProjectIdToken(
+              database.formattedName_,
+              projectId!
+            );
+          });
         });
+        this.projectIdReplaced_ = true;
       }
-    );
+      config.headers[CLOUD_RESOURCE_HEADER] = replaceProjectIdToken(
+        config.headers[CLOUD_RESOURCE_HEADER],
+        projectId!
+      );
+      const requestFn = gaxClient[config.method].bind(
+        gaxClient,
+        reqOpts,
+        // Add headers to `gaxOpts`
+        extend(true, {}, config.gaxOpts, {
+          otherArgs: {
+            headers: config.headers,
+          },
+        })
+      );
+      span.end();
+      callback(null, requestFn);
+    });
   }
 
   /**

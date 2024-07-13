@@ -102,7 +102,7 @@ import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
 import {
-  tracer,
+  startSpan,
   SPAN_CODE_ERROR,
   callbackifyAll,
   promisify,
@@ -655,60 +655,56 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
-    const that = this; // Capture the original context before starting the tracing span.
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions'
+    );
 
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
-      span => {
-        this = that;
-        if (typeof options === 'number') {
-          options = {count: options};
+    if (typeof options === 'number') {
+      options = {count: options};
+    }
+
+    const count = options.count;
+    const labels = options.labels || {};
+    const databaseRole = options.databaseRole || this.databaseRole || null;
+
+    const reqOpts: google.spanner.v1.IBatchCreateSessionsRequest = {
+      database: this.formattedName_,
+      sessionTemplate: {labels: labels, creatorRole: databaseRole},
+      sessionCount: count,
+    };
+
+    const headers = this.resourceHeader_;
+    if (this._getSpanner().routeToLeaderEnabled) {
+      addLeaderAwareRoutingHeader(headers);
+    }
+
+    this.request<google.spanner.v1.IBatchCreateSessionsResponse>(
+      {
+        client: 'SpannerClient',
+        method: 'batchCreateSessions',
+        reqOpts,
+        gaxOpts: options.gaxOptions,
+        headers: headers,
+      },
+      (err, resp) => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+          span.end();
+          callback!(err, null, resp!);
+          return;
         }
 
-        const count = options.count;
-        const labels = options.labels || {};
-        const databaseRole = options.databaseRole || this.databaseRole || null;
+        const sessions = (resp!.session || []).map(metadata => {
+          const session = this.session(metadata.name!);
+          session.metadata = metadata;
+          return session;
+        });
 
-        const reqOpts: google.spanner.v1.IBatchCreateSessionsRequest = {
-          database: this.formattedName_,
-          sessionTemplate: {labels: labels, creatorRole: databaseRole},
-          sessionCount: count,
-        };
-
-        const headers = this.resourceHeader_;
-        if (this._getSpanner().routeToLeaderEnabled) {
-          addLeaderAwareRoutingHeader(headers);
-        }
-
-        this.request<google.spanner.v1.IBatchCreateSessionsResponse>(
-          {
-            client: 'SpannerClient',
-            method: 'batchCreateSessions',
-            reqOpts,
-            gaxOpts: options.gaxOptions,
-            headers: headers,
-          },
-          (err, resp) => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-              span.end();
-              callback!(err, null, resp!);
-              return;
-            }
-
-            const sessions = (resp!.session || []).map(metadata => {
-              const session = this.session(metadata.name!);
-              session.metadata = metadata;
-              return session;
-            });
-
-            span.end();
-            callback!(null, sessions, resp!);
-          }
-        );
+        span.end();
+        callback!(null, sessions, resp!);
       }
     );
   }
@@ -2034,59 +2030,57 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | GetSnapshotCallback,
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.getSnapshot',
-      span => {
-        console.log(`span: ${span}`);
-        const callback =
-          typeof optionsOrCallback === 'function'
-            ? (optionsOrCallback as GetSnapshotCallback)
-            : cb;
-        const options =
-          typeof optionsOrCallback === 'object'
-            ? (optionsOrCallback as TimestampBounds)
-            : {};
-
-        this.pool_.getSession((err, session) => {
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
-            span.end();
-            callback!(err as ServiceError);
-            return;
-          }
-
-          const snapshot = session!.snapshot(options, this.queryOptions_);
-
-          snapshot.begin(err => {
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-              if (isSessionNotFoundError(err)) {
-                session!.lastError = err;
-                this.pool_.release(session!);
-                this.getSnapshot(options, callback!);
-                span.end();
-              } else {
-                this.pool_.release(session!);
-                span.end();
-                callback!(err);
-              }
-              return;
-            }
-
-            this._releaseOnEnd(session!, snapshot);
-            span.end();
-            console.log('span ended');
-            callback!(err, snapshot);
-          });
-        });
-      }
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/Database.getSnapshot'
     );
+    console.log(`span: ${span}`);
+    const callback =
+      typeof optionsOrCallback === 'function'
+        ? (optionsOrCallback as GetSnapshotCallback)
+        : cb;
+    const options =
+      typeof optionsOrCallback === 'object'
+        ? (optionsOrCallback as TimestampBounds)
+        : {};
+
+    this.pool_.getSession((err, session) => {
+      if (err) {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
+        });
+        span.end();
+        callback!(err as ServiceError);
+        return;
+      }
+
+      const snapshot = session!.snapshot(options, this.queryOptions_);
+
+      snapshot.begin(err => {
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+          if (isSessionNotFoundError(err)) {
+            session!.lastError = err;
+            this.pool_.release(session!);
+            this.getSnapshot(options, callback!);
+            span.end();
+          } else {
+            this.pool_.release(session!);
+            span.end();
+            callback!(err);
+          }
+          return;
+        }
+
+        this._releaseOnEnd(session!, snapshot);
+        span.end();
+        console.log('span ended');
+        callback!(err, snapshot);
+      });
+    });
   }
   /**
    * @typedef {array} GetTransactionResponse
@@ -3112,79 +3106,77 @@ class Database extends common.GrpcServiceObject {
     fn?: RunTransactionCallback
   ): void {
     console.log('database.runTransaction', fn);
-    tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.runTransaction',
-      span => {
-        const runFn =
-          typeof optionsOrRunFn === 'function'
-            ? (optionsOrRunFn as RunTransactionCallback)
-            : fn;
-        const options =
-          typeof optionsOrRunFn === 'object' && optionsOrRunFn
-            ? (optionsOrRunFn as RunTransactionOptions)
-            : {};
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/Database.runTransaction'
+    );
+    const runFn =
+      typeof optionsOrRunFn === 'function'
+        ? (optionsOrRunFn as RunTransactionCallback)
+        : fn;
+    const options =
+      typeof optionsOrRunFn === 'object' && optionsOrRunFn
+        ? (optionsOrRunFn as RunTransactionOptions)
+        : {};
 
-        this.pool_.getSession((err, session?, transaction?) => {
-          console.log('getSession', err);
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
-          }
-
-          if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
-            span.end();
-            this.runTransaction(options, runFn!);
-            return;
-          }
-
-          if (err) {
-            span.end();
-            runFn!(err as grpc.ServiceError);
-            return;
-          }
-          if (options.optimisticLock) {
-            transaction!.useOptimisticLock();
-          }
-          if (options.excludeTxnFromChangeStreams) {
-            transaction!.excludeTxnFromChangeStreams();
-          }
-
-          const release = () => {
-            span.end();
-            console.log('releasing from pool');
-            this.pool_.release(session!);
-          };
-
-          const runner = new TransactionRunner(
-            session!,
-            transaction!,
-            runFn!,
-            options
-          );
-
-          runner.run().then(release, err => {
-            console.log('runner.result', err);
-            if (err) {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-            }
-            span.end();
-
-            if (isSessionNotFoundError(err)) {
-              release();
-              this.runTransaction(options, runFn!);
-            } else {
-              setImmediate(runFn!, err);
-              release();
-            }
-          });
+    this.pool_.getSession((err, session?, transaction?) => {
+      console.log('getSession', err);
+      if (err) {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
         });
       }
-    );
+
+      if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
+        span.end();
+        this.runTransaction(options, runFn!);
+        return;
+      }
+
+      if (err) {
+        span.end();
+        runFn!(err as grpc.ServiceError);
+        return;
+      }
+      if (options.optimisticLock) {
+        transaction!.useOptimisticLock();
+      }
+      if (options.excludeTxnFromChangeStreams) {
+        transaction!.excludeTxnFromChangeStreams();
+      }
+
+      const release = () => {
+        span.end();
+        console.log('releasing from pool');
+        this.pool_.release(session!);
+      };
+
+      const runner = new TransactionRunner(
+        session!,
+        transaction!,
+        runFn!,
+        options
+      );
+
+      runner.run().then(release, err => {
+        console.log('runner.result', err);
+        if (err) {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+        }
+        span.end();
+
+        if (isSessionNotFoundError(err)) {
+          release();
+          this.runTransaction(options, runFn!);
+        } else {
+          setImmediate(runFn!, err);
+          release();
+        }
+      });
+    });
   }
 
   runTransactionAsync<T = {}>(
@@ -3365,81 +3357,76 @@ class Database extends common.GrpcServiceObject {
     mutationGroups: MutationGroup[],
     options?: BatchWriteOptions
   ): NodeJS.ReadableStream {
-    return tracer.startActiveSpan(
-      'cloud.google.com/nodejs/spanner/Database.batchWriteAtLeastOnce',
-      span => {
-        const proxyStream: Transform = through.obj();
-
-        this.pool_.getSession((err, session) => {
-          if (err) {
-            span.setStatus({
-              code: SPAN_CODE_ERROR,
-              message: err.toString(),
-            });
-            span.end();
-            proxyStream.destroy(err);
-            return;
-          }
-          const gaxOpts = extend(true, {}, options?.gaxOptions);
-          const reqOpts = Object.assign(
-            {} as spannerClient.spanner.v1.BatchWriteRequest,
-            {
-              session: session!.formattedName_!,
-              mutationGroups: mutationGroups.map(mg => mg.proto()),
-              requestOptions: options?.requestOptions,
-              excludeTxnFromChangeStream: options?.excludeTxnFromChangeStreams,
-            }
-          );
-          let dataReceived = false;
-          let dataStream = this.requestStream({
-            client: 'SpannerClient',
-            method: 'batchWrite',
-            reqOpts,
-            gaxOpts,
-            headers: this.resourceHeader_,
-          });
-          dataStream
-            .once('data', () => (dataReceived = true))
-            .once('error', err => {
-              span.setStatus({
-                code: SPAN_CODE_ERROR,
-                message: err.toString(),
-              });
-
-              if (
-                !dataReceived &&
-                isSessionNotFoundError(err as grpc.ServiceError)
-              ) {
-                // If there's a 'Session not found' error and we have not yet received
-                // any data, we can safely retry the writes on a new session.
-                // Register the error on the session so the pool can discard it.
-                if (session) {
-                  session.lastError = err as grpc.ServiceError;
-                }
-                // Remove the current data stream from the end user stream.
-                dataStream.unpipe(proxyStream);
-                dataStream.end();
-                // Create a new stream and add it to the end user stream.
-                dataStream = this.batchWriteAtLeastOnce(
-                  mutationGroups,
-                  options
-                );
-                dataStream.pipe(proxyStream);
-              } else {
-                proxyStream.destroy(err);
-              }
-              span.end();
-            })
-            .once('end', () => {
-              this.pool_.release(session!);
-              span.end();
-            })
-            .pipe(proxyStream);
-        });
-
-        return proxyStream as NodeJS.ReadableStream;
-      }
+    const span = startSpan(
+      'cloud.google.com/nodejs/spanner/Database.batchWriteAtLeastOnce'
     );
+    const proxyStream: Transform = through.obj();
+
+    this.pool_.getSession((err, session) => {
+      if (err) {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
+        });
+        span.end();
+        proxyStream.destroy(err);
+        return;
+      }
+      const gaxOpts = extend(true, {}, options?.gaxOptions);
+      const reqOpts = Object.assign(
+        {} as spannerClient.spanner.v1.BatchWriteRequest,
+        {
+          session: session!.formattedName_!,
+          mutationGroups: mutationGroups.map(mg => mg.proto()),
+          requestOptions: options?.requestOptions,
+          excludeTxnFromChangeStream: options?.excludeTxnFromChangeStreams,
+        }
+      );
+      let dataReceived = false;
+      let dataStream = this.requestStream({
+        client: 'SpannerClient',
+        method: 'batchWrite',
+        reqOpts,
+        gaxOpts,
+        headers: this.resourceHeader_,
+      });
+      dataStream
+        .once('data', () => (dataReceived = true))
+        .once('error', err => {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+
+          if (
+            !dataReceived &&
+            isSessionNotFoundError(err as grpc.ServiceError)
+          ) {
+            // If there's a 'Session not found' error and we have not yet received
+            // any data, we can safely retry the writes on a new session.
+            // Register the error on the session so the pool can discard it.
+            if (session) {
+              session.lastError = err as grpc.ServiceError;
+            }
+            // Remove the current data stream from the end user stream.
+            dataStream.unpipe(proxyStream);
+            dataStream.end();
+            // Create a new stream and add it to the end user stream.
+            dataStream = this.batchWriteAtLeastOnce(mutationGroups, options);
+            dataStream.pipe(proxyStream);
+          } else {
+            proxyStream.destroy(err);
+          }
+          span.end();
+        })
+        .once('end', () => {
+          this.pool_.release(session!);
+          span.end();
+        })
+        .pipe(proxyStream);
+    });
+
+    return proxyStream as NodeJS.ReadableStream;
   }
 
   /**
