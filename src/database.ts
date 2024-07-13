@@ -2732,6 +2732,8 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | RunCallback,
     cb?: RunCallback
   ): void | Promise<RunResponse> {
+    const span = startTrace('cloud.google.com/nodejs/spanner/Database.run');
+
     let stats: ResultSetStats;
     let metadata: ResultSetMetadata;
     const rows: Row[] = [];
@@ -2745,7 +2747,13 @@ class Database extends common.GrpcServiceObject {
         : {};
 
     this.runStream(query, options)
-      .on('error', callback!)
+      .on('error', err => {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
+        });
+        callback!(err as grpc.ServiceError, rows, stats, metadata);
+      })
       .on('response', response => {
         if (response.metadata) {
           metadata = response.metadata;
@@ -2756,6 +2764,7 @@ class Database extends common.GrpcServiceObject {
         rows.push(row);
       })
       .on('end', () => {
+        span.end();
         callback!(null, rows, stats, metadata);
       });
   }
@@ -2957,11 +2966,20 @@ class Database extends common.GrpcServiceObject {
     query: string | ExecuteSqlRequest,
     options?: TimestampBounds
   ): PartialResultStream {
+    const span = startTrace(
+      'cloud.google.com/nodejs/spanner/Database.runStream'
+    );
+
     const proxyStream: Transform = through.obj();
 
     this.pool_.getSession((err, session) => {
       if (err) {
+        span.setStatus({
+          code: SPAN_CODE_ERROR,
+          message: err.toString(),
+        });
         proxyStream.destroy(err);
+        span.end();
         return;
       }
 
@@ -2975,6 +2993,11 @@ class Database extends common.GrpcServiceObject {
       dataStream
         .once('data', () => (dataReceived = true))
         .once('error', err => {
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+
           if (
             !dataReceived &&
             isSessionNotFoundError(err as grpc.ServiceError)
@@ -2997,10 +3020,15 @@ class Database extends common.GrpcServiceObject {
             proxyStream.destroy(err);
             snapshot.end();
           }
+
+          span.end();
         })
         .on('stats', stats => proxyStream.emit('stats', stats))
         .on('response', response => proxyStream.emit('response', response))
-        .once('end', endListener)
+        .once('end', () => {
+          span.end();
+          endListener;
+        })
         .pipe(proxyStream);
     });
 
@@ -3393,11 +3421,6 @@ class Database extends common.GrpcServiceObject {
       dataStream
         .once('data', () => (dataReceived = true))
         .once('error', err => {
-          span.setStatus({
-            code: SPAN_CODE_ERROR,
-            message: err.toString(),
-          });
-
           if (
             !dataReceived &&
             isSessionNotFoundError(err as grpc.ServiceError)
@@ -3417,6 +3440,12 @@ class Database extends common.GrpcServiceObject {
           } else {
             proxyStream.destroy(err);
           }
+
+          span.setStatus({
+            code: SPAN_CODE_ERROR,
+            message: err.toString(),
+          });
+
           span.end();
         })
         .once('end', () => {

@@ -97,8 +97,26 @@ function exportSpans(instanceId, databaseId, projectId) {
         instanceId,
         databaseId,
         () => {
-          insertUsingDml(tracer, database, () => {
+          insertUsingDml(tracer, database, async () => {
             console.log('main span.end');
+
+            try {
+              const query = {
+                sql: 'SELECT SingerId, FirstName, LastName FROM Singers',
+              };
+              const [rows] = await database.run(query);
+
+              for (const row of rows) {
+                const json = row.toJSON();
+
+                console.log(
+                  `SingerId: ${json.SingerId}, FirstName: ${json.FirstName}, LastName: ${json.LastName}`
+                );
+              }
+            } catch (err) {
+              console.error('ERROR:', err);
+            }
+
             span.end();
             spanner.close();
             setTimeout(() => {
