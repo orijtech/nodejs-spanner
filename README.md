@@ -92,6 +92,10 @@ Please use a tracer named "nodejs-spanner".
 
 > :warning: **Make sure that the OpenTelemetry imports are the first, before importing the Spanner library**
 
+> :warning: **In order for your spans to be annotated with SQL, you MUST opt-in by setting environment variable
+`SPANNER_NODEJS_ANNOTATE_PII_SQL=1`, this is because SQL statements can be
+sensitive personally-identifiable-information (PII).**
+
 To test out trace examination, you can use the Zipkin tracing service like this.
 
 ```javascript

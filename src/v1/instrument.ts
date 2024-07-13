@@ -39,14 +39,30 @@ registerInstrumentations({
   instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
 });
 
+var optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
+
+interface SQLStatement {
+  sql: string;
+}
+
 // startSpan synchronously returns a span to avoid the dramatic
 // scope change in which trying to use tracer.startActiveSpan
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
-export function startTrace(spanNameSuffix: String): Span {
+export function startTrace(spanNameSuffix: string, sql?: string | SQLStatement): Span {
   const span = tracer.startSpan(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix
   );
+
+  if (optedInPII && sql) {
+    if (typeof sql === 'string') {
+      span.setAttribute('sql', sql as string);
+    } else {
+      const stmt = sql as SQLStatement;
+      span.setAttribute('sql', stmt.sql);
+    }
+  }
+
   // Now set the span as the active one in the current context so that
   // future invocations to startTrace will have this current span as
   // the parent.

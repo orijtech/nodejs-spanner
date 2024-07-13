@@ -2719,7 +2719,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | RunCallback,
     cb?: RunCallback
   ): void | Promise<RunResponse> {
-    const span = startTrace('Database.run');
+    const span = startTrace('Database.run', query);
 
     let stats: ResultSetStats;
     let metadata: ResultSetMetadata;

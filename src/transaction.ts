@@ -1011,7 +1011,7 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
-    const span = startTrace('Transaction.run');
+    const span = startTrace('Transaction.run', query);
     const rows: Rows = [];
     let stats: google.spanner.v1.ResultSetStats;
     let metadata: google.spanner.v1.ResultSetMetadata;
@@ -1138,7 +1138,7 @@ export class Snapshot extends EventEmitter {
    * ```
    */
   runStream(query: string | ExecuteSqlRequest): PartialResultStream {
-    const span = startTrace('Transaction.runStream');
+    const span = startTrace('Transaction.runStream', query);
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
@@ -1542,7 +1542,7 @@ export class Dml extends Snapshot {
     query: string | ExecuteSqlRequest,
     callback?: RunUpdateCallback
   ): void | Promise<RunUpdateResponse> {
-    const span = startTrace('Transaction.runUpdate');
+    const span = startTrace('Transaction.runUpdate', query);
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
