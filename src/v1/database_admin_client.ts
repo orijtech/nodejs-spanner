@@ -476,7 +476,6 @@ export class DatabaseAdminClient {
       const callPromise = this.databaseAdminStub.then(
         stub =>
           (...args: Array<{}>) => {
-            console.log('running', methodName);
             if (this._terminated) {
               const msg = 'The client has already been closed.';
               return Promise.reject(msg);
@@ -507,10 +506,6 @@ export class DatabaseAdminClient {
               }
 
               span = startTrace('DatabaseAdminClient.' + methodName);
-              console.log(
-                'started the span and intercepted.metadata',
-                methodName
-              );
             });
 
             const priorErrorListeners = call.listeners('error');
@@ -519,7 +514,6 @@ export class DatabaseAdminClient {
                 fn(err);
               });
 
-              console.log('intercepted.error', methodName, err.toString());
               setSpanError(span, err);
               span.end();
             });
@@ -530,7 +524,6 @@ export class DatabaseAdminClient {
                 fn(status);
               });
 
-              console.log('intercepted.status', methodName);
               if (status.code !== 0) {
                 setSpanError(span, status.message);
               }

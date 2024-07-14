@@ -2026,7 +2026,6 @@ class Database extends common.GrpcServiceObject {
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
     const span = startTrace('Database.getSnapshot');
-    console.log(`span: ${span}`);
     const callback =
       typeof optionsOrCallback === 'function'
         ? (optionsOrCallback as GetSnapshotCallback)
@@ -2064,7 +2063,6 @@ class Database extends common.GrpcServiceObject {
 
         this._releaseOnEnd(session!, snapshot);
         span.end();
-        console.log('span ended');
         callback!(err, snapshot);
       });
     });
@@ -3109,7 +3107,6 @@ class Database extends common.GrpcServiceObject {
     optionsOrRunFn: RunTransactionOptions | RunTransactionCallback,
     fn?: RunTransactionCallback
   ): void {
-    console.log('database.runTransaction', fn);
     const span = startTrace('Database.runTransaction');
     const runFn =
       typeof optionsOrRunFn === 'function'
@@ -3121,7 +3118,6 @@ class Database extends common.GrpcServiceObject {
         : {};
 
     this.pool_.getSession((err, session?, transaction?) => {
-      console.log('getSession', err);
       if (err) {
         setSpanError(span, err);
       }
@@ -3146,7 +3142,6 @@ class Database extends common.GrpcServiceObject {
 
       const release = () => {
         span.end();
-        console.log('releasing from pool');
         this.pool_.release(session!);
       };
 
@@ -3158,7 +3153,6 @@ class Database extends common.GrpcServiceObject {
       );
 
       runner.run().then(release, err => {
-        console.log('runner.result', err);
         if (err) {
           setSpanError(span, err);
         }
