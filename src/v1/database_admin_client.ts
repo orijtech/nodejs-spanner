@@ -28,7 +28,7 @@ import type {
   PaginationCallback,
   GaxCall,
 } from 'google-gax';
-import {Transform} from 'stream';
+import {Duplex, Transform, finished} from 'stream';
 import * as protos from '../../protos/protos';
 import jsonProtos = require('../../protos/protos.json');
 
@@ -40,8 +40,7 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './database_admin_client_config.json';
 const version = require('../../../package.json').version;
 
-const {Span} = require('@opentelemetry/api');
-import {startTrace, setSpanError} from './instrument';
+import {Span_, startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner Database Admin API
@@ -473,11 +472,15 @@ export class DatabaseAdminClient {
       'listBackupSchedules',
     ];
     for (const methodName of databaseAdminStubMethods) {
+      let span: Span_;
+
       const callPromise = this.databaseAdminStub.then(
         stub =>
           (...args: Array<{}>) => {
             if (this._terminated) {
               const msg = 'The client has already been closed.';
+              setSpanError(span, msg);
+              span.end();
               return Promise.reject(msg);
             }
 
@@ -487,26 +490,6 @@ export class DatabaseAdminClient {
             // like when metadata is generated, on an error and
             // status set after completion of the call.
             const call = func.apply(stub, args);
-
-            let span: typeof Span;
-
-            // Sadly, patching the the call isn't working directly
-            // so for starters we shall have the less accurate 'metadata'
-            // event listener which will trigger the start of the span
-            // after we've received back metadata.
-            // TODO: Properly patch the invoking call.call.
-            const priorMetadataListeners = call.listeners('metadata');
-            call.on('metadata', metadata => {
-              priorMetadataListeners.forEach(fn => {
-                fn(metadata);
-              });
-
-              if (span) {
-                return;
-              }
-
-              span = startTrace('DatabaseAdminClient.' + methodName);
-            });
 
             const priorErrorListeners = call.listeners('error');
             call.on('error', err => {
@@ -548,7 +531,37 @@ export class DatabaseAdminClient {
         this._opts.fallback
       );
 
-      this.innerApiCalls[methodName] = apiCall;
+      this.innerApiCalls[methodName] = arg => {
+        span = startTrace('DatabaseAdminClient.' + methodName);
+        const result = apiCall(arg);
+        if (!result) {
+          return result;
+        }
+
+        // result is most definitely one of the gRPC wrapped/resolved
+        // stubs/methods thus our goal is to reliably end spans when
+        // those gRPC calls have actually ended.
+
+        if (Promise.resolve(result) === result) { // The type is 'Promise'
+          result.finally(() => {
+            span.end();
+          });
+        } else if (result as Duplex) { // Otherwise it is a 'gax.CancellableStream'
+          const duplex = result as Duplex;
+          finished(duplex, err => {
+            if (err) {
+              setSpanError(span, err);
+            }
+            span.end();
+          });
+        } else {
+          // Simply end the span as is immediately as
+          // no predictable future calls might be made.
+          span.end();
+        }
+
+        return result;
+      };
     }
 
     return this.databaseAdminStub;

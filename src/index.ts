@@ -1573,8 +1573,32 @@ class Spanner extends GrpcService {
           },
         })
       );
-      span.end();
-      callback(null, requestFn);
+
+      // Wrap resultFn with a function that'll invoke span.end() once
+      // resultFn's results are returned for proper tracing.
+      callback(null, (...args) => {
+        const result = requestFn(...args);
+        if (!result) {
+          span.end();
+          return result;
+        }
+
+        if (typeof result.on !== 'function') {
+          span.end();
+        } else {
+          result.on('end', () => {
+            span.end();
+          });
+          result.on('close', () => {
+            span.end();
+          });
+          result.on('error', err => {
+            setSpanError(span, err);
+            span.end();
+          });
+        }
+        return result;
+      });
     });
   }
 
