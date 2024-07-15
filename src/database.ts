@@ -662,6 +662,7 @@ class Database extends common.GrpcServiceObject {
     }
 
     const count = options.count;
+    span.setAttribute('session.count.requested', count);
     const labels = options.labels || {};
     const databaseRole = options.databaseRole || this.databaseRole || null;
 
@@ -674,6 +675,7 @@ class Database extends common.GrpcServiceObject {
     const headers = this.resourceHeader_;
     if (this._getSpanner().routeToLeaderEnabled) {
       addLeaderAwareRoutingHeader(headers);
+      span.addEvent('leaderAwareRouting header added');
     }
 
     this.request<google.spanner.v1.IBatchCreateSessionsResponse>(
@@ -697,6 +699,8 @@ class Database extends common.GrpcServiceObject {
           session.metadata = metadata;
           return session;
         });
+
+        span.setAttribute('session.count.created', sessions.length);
 
         span.end();
         callback!(null, sessions, resp!);

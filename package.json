@@ -65,6 +65,7 @@
     "@opentelemetry/resources": "^1.25.1",
     "@opentelemetry/sdk-trace-base": "^1.25.1",
     "@opentelemetry/sdk-trace-node": "^1.25.1",
+    "@opentelemetry/semantic-conventions": "^1.25.1",
     "@types/big.js": "^6.0.0",
     "@types/stack-trace": "0.0.33",
     "arrify": "^2.0.0",
