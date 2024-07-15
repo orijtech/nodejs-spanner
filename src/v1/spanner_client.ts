@@ -38,7 +38,7 @@ import jsonProtos = require('../../protos/protos.json');
 import * as gapicConfig from './spanner_client_config.json';
 const version = require('../../../package.json').version;
 
-import {startTrace, setSpanError} from './instrument';
+import {Span_, startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner API
@@ -156,9 +156,7 @@ export class SpannerClient {
 
     // Load google-gax module synchronously if needed
     if (!gaxInstance) {
-      const span = startTrace('SpannerClient.loadGax');
       gaxInstance = require('google-gax') as typeof gax;
-      span.end();
     }
 
     // Choose either gRPC or proto-over-HTTP implementation of google-gax.
@@ -315,11 +313,11 @@ export class SpannerClient {
       'batchWrite',
     ];
     for (const methodName of spannerStubMethods) {
+      let span: Span_;
+
       const callPromise = this.spannerStub.then(
         stub =>
           (...args: Array<{}>) => {
-            const spanName = 'SpannerClient.' + methodName;
-            const span = startTrace(spanName);
             if (this._terminated) {
               const msg = 'The client has already been closed';
 
@@ -390,7 +388,21 @@ export class SpannerClient {
         this._opts.fallback
       );
 
-      this.innerApiCalls[methodName] = apiCall;
+      if (typeof apiCall !== 'function') {
+        this.innerApiCalls[methodName] = apiCall;
+      } else { // Let's trace the generated function.
+        // Credit to https://stackoverflow.com/a/57278182
+        // for the elegant solution of transparently`wrapping
+        // a function and passing in the arguments, and out results.
+        const wrapper =
+          <A extends any[], R>(f: (...a: A) => R) =>
+          (...args: A): R => {
+            span = startTrace('SpannerClient.' + methodName);
+            const value = f(...args);
+            return value;
+          };
+        this.innerApiCalls[methodName] = wrapper(apiCall);
+      }
     }
 
     return this.spannerStub;

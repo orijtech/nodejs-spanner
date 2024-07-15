@@ -542,11 +542,13 @@ export class DatabaseAdminClient {
         // stubs/methods thus our goal is to reliably end spans when
         // those gRPC calls have actually ended.
 
-        if (Promise.resolve(result) === result) { // The type is 'Promise'
+        if (Promise.resolve(result) === result) {
+          // The type is 'Promise'
           result.finally(() => {
             span.end();
           });
-        } else if (result as Duplex) { // Otherwise it is a 'gax.CancellableStream'
+        } else if (result as Duplex) {
+          // Otherwise it is a 'gax.CancellableStream'
           const duplex = result as Duplex;
           finished(duplex, err => {
             if (err) {

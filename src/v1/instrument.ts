@@ -229,16 +229,17 @@ export function promisify(
 
         if (err) {
           setSpanError(span, err);
+          const result = reject(err);
           span.end();
-          return reject(err);
+          return result;
         }
 
-        span.end();
         if (options!.singular && callbackArgs.length === 1) {
           resolve(callbackArgs[0]);
         } else {
           resolve(callbackArgs);
         }
+        span.end();
       });
 
       originalMethod.apply(this, args);
