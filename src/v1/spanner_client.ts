@@ -163,9 +163,7 @@ export class SpannerClient {
     this._gaxModule = opts.fallback ? gaxInstance.fallback : gaxInstance;
 
     // Create a `gaxGrpc` object, with any grpc-specific options sent to the client.
-    const span = startTrace('SpannerClient.newGrpcClient');
     this._gaxGrpc = new this._gaxModule.GrpcClient(opts);
-    span.end();
 
     // Save options to use in initialize() method.
     this._opts = opts;
@@ -372,7 +370,9 @@ export class SpannerClient {
             return call;
           },
         (err: Error | null | undefined) => () => {
-          // TODO: retrieve the active span and end it.
+          span.recordException(err);
+          setSpanError(span, err);
+          span.end();
           throw err;
         }
       );

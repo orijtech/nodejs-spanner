@@ -902,7 +902,8 @@ export class Snapshot extends EventEmitter {
     requestOrCallback: ReadRequest | ReadCallback,
     cb?: ReadCallback
   ): void | Promise<ReadResponse> {
-    const span = startTrace('Transaction.read');
+    const span = startTrace('Transaction.read', undefined, table);
+
     const rows: Rows = [];
 
     let request: ReadRequest;

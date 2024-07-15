@@ -21,6 +21,7 @@ import * as extend from 'extend';
 import {GoogleAuth, GoogleAuthOptions} from 'google-auth-library';
 import * as path from 'path';
 import {common as p} from 'protobufjs';
+import {finished} from 'stream';
 import * as streamEvents from 'stream-events';
 import * as through from 'through2';
 import {
@@ -1521,8 +1522,10 @@ class Spanner extends GrpcService {
    */
   prepareGapicRequest_(config, callback) {
     const span = startTrace('Spanner.prepareGapicRequest');
+
     this.auth.getProjectId((err, projectId) => {
       if (err) {
+        span.addEvent('failed to correctly retrieve the projectId');
         setSpanError(span, err);
         span.end();
         callback(err);
@@ -1586,14 +1589,10 @@ class Spanner extends GrpcService {
         if (typeof result.on !== 'function') {
           span.end();
         } else {
-          result.on('end', () => {
-            span.end();
-          });
-          result.on('close', () => {
-            span.end();
-          });
-          result.on('error', err => {
-            setSpanError(span, err);
+          finished(result, err => {
+            if (err) {
+              setSpanError(span, err);
+            }
             span.end();
           });
         }

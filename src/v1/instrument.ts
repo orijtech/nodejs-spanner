@@ -15,6 +15,7 @@
 import {
   SEMATTRS_DB_STATEMENT,
   SEMATTRS_DB_SYSTEM,
+  SEMATTRS_DB_SQL_TABLE,
 } from '@opentelemetry/semantic-conventions';
 
 // Ensure that the auto-instrumentation for gRPC & HTTP generates
@@ -52,13 +53,18 @@ interface SQLStatement {
 // would radically change all the code structures making it more invasive.
 export function startTrace(
   spanNameSuffix: string,
-  sql?: string | SQLStatement
+  sql?: string | SQLStatement,
+  tableName?: string
 ): Span {
   const span = tracer.startSpan(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix
   );
 
   span.setAttribute(SEMATTRS_DB_SYSTEM, 'google.cloud.spanner');
+
+  if (tableName) {
+    span.setAttribute(SEMATTRS_DB_SQL_TABLE, tableName);
+  }
 
   if (optedInPII && sql) {
     if (typeof sql === 'string') {
