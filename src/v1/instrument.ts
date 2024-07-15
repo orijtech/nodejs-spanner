@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Span, SpanStatusCode} from '@opentelemetry/api';
+import {
+  SEMATTRS_DB_STATEMENT,
+  SEMATTRS_DB_SYSTEM,
+} from '@opentelemetry/semantic-conventions';
 
-// Ensure that we've registered the gRPC instrumentation.
+// Ensure that the auto-instrumentation for gRPC & HTTP generates
+// traces that'll be displayed along with the spans we've created.
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
-const {BatchSpanProcessor} = require('@opentelemetry/sdk-trace-base');
 const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
 const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+registerInstrumentations({
+  instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
+});
+
 const {
   CallbackMethod,
-  Class,
   CallbackifyAllOptions,
   PromiseMethod,
   PromisifyAllOptions,
@@ -29,14 +35,10 @@ const {
   WithPromise,
 } = require('@google-cloud/promisify');
 
-import {context, trace} from '@opentelemetry/api';
+import {Span, SpanStatusCode, context, trace} from '@opentelemetry/api';
 const tracer = trace.getTracer('nodejs-spanner');
 
-// Ensure that the auto-instrumentation for gRPC & HTTP generates
-// traces that'll be displayed along with the spans we've created.
-registerInstrumentations({
-  instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
-});
+export type Span_ = Span;
 
 const optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 
@@ -56,12 +58,14 @@ export function startTrace(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix
   );
 
+  span.setAttribute(SEMATTRS_DB_SYSTEM, 'google.cloud.spanner');
+
   if (optedInPII && sql) {
     if (typeof sql === 'string') {
-      span.setAttribute('sql', sql as string);
+      span.setAttribute(SEMATTRS_DB_STATEMENT, sql as string);
     } else {
       const stmt = sql as SQLStatement;
-      span.setAttribute('sql', stmt.sql);
+      span.setAttribute(SEMATTRS_DB_STATEMENT, stmt.sql);
     }
   }
 
