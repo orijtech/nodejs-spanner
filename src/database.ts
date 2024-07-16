@@ -3005,7 +3005,7 @@ class Database extends common.GrpcServiceObject {
         .on('response', response => proxyStream.emit('response', response))
         .once('end', () => {
           span.end();
-          endListener;
+          endListener();
         })
         .pipe(proxyStream);
     });

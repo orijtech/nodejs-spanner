@@ -776,6 +776,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
         throw e;
       }
 
+      span.addEvent(`started adding ${amount} sessions to the inventory`);
       sessions.forEach((session: Session) => {
         setImmediate(() => {
           this._inventory.borrowed.add(session);
@@ -783,6 +784,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
           this.release(session);
         });
       });
+      span.addEvent(`finished adding ${amount} sessions to the inventory`);
     }
 
     span.end();
@@ -901,14 +903,14 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
   async _getSession(startTime: number): Promise<Session> {
     const span = startTrace('SessionPool.getSession');
     if (this._hasSessionUsableFor()) {
-      span.addEvent('has usable session');
+      span.addEvent('Cache hit: has usable session');
       const sessPromise = this._borrowNextAvailableSession();
       span.end();
       return sessPromise;
     }
 
     if (this.isFull && this.options.fail!) {
-      span.addEvent('session pool is full');
+      span.addEvent('session pool is full and failFast=true');
       const err = new SessionPoolExhaustedError(this._getLeaks());
       span.recordException(err);
       setSpanError(span, err);
@@ -923,7 +925,12 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     const availableEvent = 'session-available';
     const promises = [
       new Promise((_, reject) => {
-        const onceCloseListener = () => reject(new GoogleError(errors.Closed));
+        const onceCloseListener = () => {
+          const err = new GoogleError(errors.Closed);
+          setSpanError(span, err);
+          span.end();
+          reject(err);
+        };
         this.once('close', onceCloseListener);
         removeOnceCloseListener = this.removeListener.bind(
           this,
@@ -1048,33 +1055,23 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @returns {Promise}
    */
   async _ping(session: Session): Promise<void> {
-    const span = startTrace('SessionPool.pingSession');
-    const sessionId = session.id.toString();
-    span.setAttribute('session.id', sessionId);
+    // NOTE: Please do not trace Ping as it gets quite spammy
+    // with many root spans polluting the main span.
+    // Please see https://github.com/googleapis/google-cloud-go/issues/1691
     this._borrow(session);
 
     if (!this._isValidSession(session)) {
-      span.addEvent('invalid session', {'session.id': sessionId});
       this._inventory.borrowed.delete(session);
-      span.end();
       return;
     }
 
     try {
       await session.keepAlive();
-      span.addEvent('finished setting keepAlive on valid session', {
-        'session.id': sessionId,
-      });
       this.release(session);
     } catch (e) {
-      span.recordException(e as Error);
-      span.addEvent('destroying session', {'session.id': sessionId});
-      setSpanError(span, e as Error);
       this._inventory.borrowed.delete(session);
       this._destroy(session);
     }
-
-    span.end();
   }
 
   /**

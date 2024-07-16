@@ -370,8 +370,10 @@ export class SpannerClient {
             return call;
           },
         (err: Error | null | undefined) => () => {
-          span.recordException(err);
-          setSpanError(span, err);
+          if (err){
+            span.recordException(err);
+            setSpanError(span, err);
+          }
           span.end();
           throw err;
         }
