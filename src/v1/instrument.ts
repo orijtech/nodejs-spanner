@@ -36,7 +36,7 @@ const {
   WithPromise,
 } = require('@google-cloud/promisify');
 
-import {Span, SpanStatusCode, context, trace} from '@opentelemetry/api';
+import {ContextManager, Span, SpanStatusCode, context, trace} from '@opentelemetry/api';
 const tracer = trace.getTracer('nodejs-spanner');
 
 export type Span_ = Span;
@@ -289,4 +289,13 @@ export function promisifyAll(
       Class.prototype[methodName] = exports.promisify(originalMethod, options);
     }
   });
+}
+
+export function setGlobalContextManager(manager: ContextManager) {
+  context.setGlobalContextManager(manager);
+}
+
+export function disableContextAndManager(manager: typeof ContextManager) {
+  manager.disable();
+  context.disable();
 }

@@ -370,7 +370,7 @@ export class SpannerClient {
             return call;
           },
         (err: Error | null | undefined) => () => {
-          if (err){
+          if (err) {
             span.recordException(err);
             setSpanError(span, err);
           }
@@ -392,7 +392,8 @@ export class SpannerClient {
 
       if (typeof apiCall !== 'function') {
         this.innerApiCalls[methodName] = apiCall;
-      } else { // Let's trace the generated function.
+      } else {
+        // Let's trace the generated function.
         // Credit to https://stackoverflow.com/a/57278182
         // for the elegant solution of transparently`wrapping
         // a function and passing in the arguments, and out results.
