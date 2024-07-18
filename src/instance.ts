@@ -50,7 +50,7 @@ import {google as instanceAdmin} from '../protos/protos';
 import {google as databaseAdmin} from '../protos/protos';
 import {google as spannerClient} from '../protos/protos';
 import {CreateInstanceRequest} from './index';
-import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './instrument';
 
 export type IBackup = databaseAdmin.spanner.admin.database.v1.IBackup;
 export type IDatabase = databaseAdmin.spanner.admin.database.v1.IDatabase;

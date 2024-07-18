@@ -80,7 +80,7 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
-import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');

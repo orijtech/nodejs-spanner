@@ -24,7 +24,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
-import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;

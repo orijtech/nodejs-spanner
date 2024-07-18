@@ -32,7 +32,7 @@ import {
 import {DateStruct, PreciseDate} from '@google-cloud/precise-date';
 import {google as databaseAdmin} from '../protos/protos';
 import {common as p} from 'protobufjs';
-import {promisifyAll, callbackifyAll} from './v1/instrument';
+import {promisifyAll, callbackifyAll} from './instrument';
 
 export type CreateBackupCallback = LongRunningCallback<Backup>;
 export type CopyBackupCallback = LongRunningCallback<Backup>;

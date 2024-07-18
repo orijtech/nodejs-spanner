@@ -24,7 +24,7 @@ import {Transaction} from './transaction';
 import {NormalCallback} from './common';
 import {GoogleError, grpc, ServiceError} from 'google-gax';
 import trace = require('stack-trace');
-import {startTrace, setSpanError} from './v1/instrument';
+import {startTrace, setSpanError} from './instrument';
 
 /**
  * @callback SessionPoolCloseCallback

@@ -43,7 +43,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
-import {promisifyAll, startTrace, setSpanError} from './v1/instrument';
+import {promisifyAll, startTrace, setSpanError} from './instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 

@@ -36,7 +36,7 @@ import {
 } from './index';
 import {CallOptions, grpc} from 'google-gax';
 import extend = require('extend');
-import {promisifyAll} from './v1/instrument';
+import {promisifyAll} from './instrument';
 
 export type IOperation = instanceAdmin.longrunning.IOperation;
 

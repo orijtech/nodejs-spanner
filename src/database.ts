@@ -107,7 +107,7 @@ import {
   callbackifyAll,
   promisify,
   promisifyAll,
-} from './v1/instrument';
+} from './instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
   IDatabaseRole,

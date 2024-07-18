@@ -25,7 +25,7 @@ import {isSessionNotFoundError} from './session-pool';
 import {Database} from './database';
 import {google} from '../protos/protos';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
-import {promisify} from './v1/instrument';
+import {promisify} from './instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const jsonProtos = require('../protos/protos.json');

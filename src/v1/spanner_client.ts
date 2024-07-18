@@ -26,7 +26,7 @@ import type {
   PaginationCallback,
   GaxCall,
 } from 'google-gax';
-import {Transform, PassThrough, finished} from 'stream';
+import {Transform, PassThrough} from 'stream';
 import * as protos from '../../protos/protos';
 import jsonProtos = require('../../protos/protos.json');
 
@@ -37,8 +37,6 @@ import jsonProtos = require('../../protos/protos.json');
  */
 import * as gapicConfig from './spanner_client_config.json';
 const version = require('../../../package.json').version;
-
-import {Span_, startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner API
@@ -311,70 +309,28 @@ export class SpannerClient {
       'batchWrite',
     ];
     for (const methodName of spannerStubMethods) {
-      let span: Span_;
-
       const callPromise = this.spannerStub.then(
         stub =>
           (...args: Array<{}>) => {
             if (this._terminated) {
-              const msg = 'The client has already been closed';
-
               if (methodName in this.descriptors.stream) {
                 const stream = new PassThrough();
                 setImmediate(() => {
-                  setSpanError(span, msg);
-                  stream.emit('error', new this._gaxModule.GoogleError(msg));
-                  span.end();
-                });
-
-                finished(stream, err => {
-                  if (err) {
-                    setSpanError(span, err);
-                  }
-                  span.end();
+                  stream.emit(
+                    'error',
+                    new this._gaxModule.GoogleError(
+                      'The client has already been closed.'
+                    )
+                  );
                 });
                 return stream;
               }
-
-              span.end();
-              return Promise.reject(msg);
+              return Promise.reject('The client has already been closed.');
             }
-
-            // In this path, the client hasn't yet been terminated.
             const func = stub[methodName];
-            const call = func.apply(stub, args);
-
-            // TODO: Add a custom interface implementation check.
-            // Retrieve all the already set 'end' event listeners and
-            // add our span.end() invocation as the last one.
-            const priorEndListeners = call.listeners('end');
-            call.on('end', () => {
-              priorEndListeners.forEach(fn => {
-                fn();
-              });
-              span.end();
-            });
-
-            // Override the 'error' event listeners and then
-            // set our span.setError for the call.
-            const priorErrListeners = call.listeners('error');
-            call.on('error', err => {
-              priorErrListeners.forEach(fn => {
-                fn(err);
-              });
-
-              setSpanError(span, err);
-              span.end();
-            });
-
-            return call;
+            return func.apply(stub, args);
           },
         (err: Error | null | undefined) => () => {
-          if (err) {
-            span.recordException(err);
-            setSpanError(span, err);
-          }
-          span.end();
           throw err;
         }
       );
@@ -390,22 +346,7 @@ export class SpannerClient {
         this._opts.fallback
       );
 
-      if (typeof apiCall !== 'function') {
-        this.innerApiCalls[methodName] = apiCall;
-      } else {
-        // Let's trace the generated function.
-        // Credit to https://stackoverflow.com/a/57278182
-        // for the elegant solution of transparently`wrapping
-        // a function and passing in the arguments, and out results.
-        const wrapper =
-          <A extends any[], R>(f: (...a: A) => R) =>
-          (...args: A): R => {
-            span = startTrace('SpannerClient.' + methodName);
-            const value = f(...args);
-            return value;
-          };
-        this.innerApiCalls[methodName] = wrapper(apiCall);
-      }
+      this.innerApiCalls[methodName] = apiCall;
     }
 
     return this.spannerStub;
@@ -2486,17 +2427,12 @@ export class SpannerClient {
    * @returns {Promise} A promise that resolves when the client is closed.
    */
   close(): Promise<void> {
-    const span = startTrace('SpannerClient.close');
     if (this.spannerStub && !this._terminated) {
       return this.spannerStub.then(stub => {
         this._terminated = true;
         stub.close();
-        span.end();
       });
     }
-    span.setAttribute('already_closed', true);
-    const value = Promise.resolve();
-    span.end();
-    return value;
+    return Promise.resolve();
   }
 }

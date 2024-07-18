@@ -28,7 +28,7 @@ import type {
   PaginationCallback,
   GaxCall,
 } from 'google-gax';
-import {Duplex, Transform, finished} from 'stream';
+import {Transform} from 'stream';
 import * as protos from '../../protos/protos';
 import jsonProtos = require('../../protos/protos.json');
 
@@ -39,8 +39,6 @@ import jsonProtos = require('../../protos/protos.json');
  */
 import * as gapicConfig from './database_admin_client_config.json';
 const version = require('../../../package.json').version;
-
-import {Span_, startTrace, setSpanError} from './instrument';
 
 /**
  *  Cloud Spanner Database Admin API
@@ -472,48 +470,14 @@ export class DatabaseAdminClient {
       'listBackupSchedules',
     ];
     for (const methodName of databaseAdminStubMethods) {
-      let span: Span_;
-
       const callPromise = this.databaseAdminStub.then(
         stub =>
           (...args: Array<{}>) => {
             if (this._terminated) {
-              const msg = 'The client has already been closed.';
-              setSpanError(span, msg);
-              span.end();
-              return Promise.reject(msg);
+              return Promise.reject('The client has already been closed.');
             }
-
             const func = stub[methodName];
-            // call is of the type grpc.ClientUnaryCall.
-            // gRPC events are emitted at different intervals
-            // like when metadata is generated, on an error and
-            // status set after completion of the call.
-            const call = func.apply(stub, args);
-
-            const priorErrorListeners = call.listeners('error');
-            call.on('error', err => {
-              priorErrorListeners.forEach(fn => {
-                fn(err);
-              });
-
-              setSpanError(span, err);
-              span.end();
-            });
-
-            const priorStatusListeners = call.listeners('status');
-            call.on('status', status => {
-              priorStatusListeners.forEach(fn => {
-                fn(status);
-              });
-
-              if (status.code !== 0) {
-                setSpanError(span, status.message);
-              }
-              span.end();
-            });
-
-            return call;
+            return func.apply(stub, args);
           },
         (err: Error | null | undefined) => () => {
           throw err;
@@ -531,39 +495,7 @@ export class DatabaseAdminClient {
         this._opts.fallback
       );
 
-      this.innerApiCalls[methodName] = arg => {
-        span = startTrace('DatabaseAdminClient.' + methodName);
-        const result = apiCall(arg);
-        if (!result) {
-          return result;
-        }
-
-        // result is most definitely one of the gRPC wrapped/resolved
-        // stubs/methods thus our goal is to reliably end spans when
-        // those gRPC calls have actually ended.
-
-        if (Promise.resolve(result) === result) {
-          // The type is 'Promise'
-          result.finally(() => {
-            span.end();
-          });
-        } else if (result as Duplex) {
-          // Otherwise it is a 'gax.CancellableStream'
-          const duplex = result as Duplex;
-          finished(duplex, err => {
-            if (err) {
-              setSpanError(span, err);
-            }
-            span.end();
-          });
-        } else {
-          // Simply end the span as is immediately as
-          // no predictable future calls might be made.
-          span.end();
-        }
-
-        return result;
-      };
+      this.innerApiCalls[methodName] = apiCall;
     }
 
     return this.databaseAdminStub;

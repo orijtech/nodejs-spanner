@@ -22,7 +22,7 @@ import {
 // traces that'll be displayed along with the spans we've created.
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
-const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+const {Instrumentation, registerInstrumentations} = require('@opentelemetry/instrumentation');
 registerInstrumentations({
   instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
 });
@@ -45,6 +45,22 @@ const optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 
 interface SQLStatement {
   sql: string;
+}
+
+export function addAutoInstrumentation(opts: { grpc?: boolean, http: boolean }) {
+  let instrumentations: typeof Instrumentation[] = [];
+
+  if (opts.grpc) {
+     instrumentations.push(new GrpcInstrumentation());
+  }
+  if (opts.http) {
+     instrumentations.push(new HttpInstrumentation());
+  }
+  if (instrumentations.length > 0) {
+    registerInstrumentations({
+      instrumentations: instrumentations,
+    });
+  }
 }
 
 // startSpan synchronously returns a span to avoid the dramatic
