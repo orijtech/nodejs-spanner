@@ -22,10 +22,13 @@ import {
 // traces that'll be displayed along with the spans we've created.
 const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
 const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
-const {Instrumentation, registerInstrumentations} = require('@opentelemetry/instrumentation');
-registerInstrumentations({
-  instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
-});
+const {TracerProvider} = require('@opentelemetry/sdk-trace-node');
+
+// Optional instrumentation that the user will configure if they'd like to.
+const {
+  Instrumentation,
+  registerInstrumentations,
+} = require('@opentelemetry/instrumentation');
 
 const {
   CallbackMethod,
@@ -36,8 +39,13 @@ const {
   WithPromise,
 } = require('@google-cloud/promisify');
 
-import {ContextManager, Span, SpanStatusCode, context, trace} from '@opentelemetry/api';
-const tracer = trace.getTracer('nodejs-spanner');
+import {
+  ContextManager,
+  Span,
+  SpanStatusCode,
+  context,
+  trace,
+} from '@opentelemetry/api';
 
 export type Span_ = Span;
 
@@ -47,20 +55,41 @@ interface SQLStatement {
   sql: string;
 }
 
-export function addAutoInstrumentation(opts: { grpc?: boolean, http: boolean }) {
-  let instrumentations: typeof Instrumentation[] = [];
+export function addAutoInstrumentation(opts: {
+  grpc?: boolean;
+  http: boolean;
+  traceProvider: typeof TracerProvider;
+}) {
+  const instrumentations: (typeof Instrumentation)[] = [];
 
   if (opts.grpc) {
-     instrumentations.push(new GrpcInstrumentation());
+    instrumentations.push(new GrpcInstrumentation());
   }
   if (opts.http) {
-     instrumentations.push(new HttpInstrumentation());
+    instrumentations.push(new HttpInstrumentation());
   }
-  if (instrumentations.length > 0) {
+
+  if (instrumentations.length <= 0) {
+    return;
+  }
+
+  if (opts.traceProvider) {
+    instrumentations.forEach(instrumentation => {
+      instrumentation.setTraceProvider(opts.traceProvider);
+      instrumentation.enable();
+    });
+  } else {
     registerInstrumentations({
       instrumentations: instrumentations,
     });
   }
+}
+
+// initTracer fetches the tracer each time that it is invoked to solve
+// the problem of observability being initialized after Spanner objects
+// have been already created.
+export function initTracer() {
+  return trace.getTracer('nodejs-spanner');
 }
 
 // startSpan synchronously returns a span to avoid the dramatic
@@ -72,7 +101,7 @@ export function startTrace(
   sql?: string | SQLStatement,
   tableName?: string
 ): Span {
-  const span = tracer.startSpan(
+  const span = initTracer().startSpan(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix
   );
 
