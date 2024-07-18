@@ -1122,8 +1122,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @param {Session} session The session object.
    */
   _release(session: Session): void {
-    const span = startTrace('SessionPool.releaseSessionIntoPool');
-    span.setAttribute('session.id', session.id.toString());
     this._inventory.sessions.push(session);
     this._inventory.borrowed.delete(session);
     this._traces.delete(session.id);
@@ -1132,7 +1130,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     this.emit('session-available');
     this.emit('readonly-available');
     this.emit('readwrite-available');
-    span.end();
   }
 
   /**
