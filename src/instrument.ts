@@ -49,7 +49,7 @@ import {
 
 export type Span_ = Span;
 
-const optedInPII = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
+let optedInPII: boolean = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 
 interface SQLStatement {
   sql: string;
@@ -90,6 +90,13 @@ export function addAutoInstrumentation(opts: {
 // have been already created.
 export function initTracer() {
   return trace.getTracer('nodejs-spanner');
+}
+export function optInForSQLStatementOnSpans() {
+  optedInPII = true;
+}
+
+export function optOutOfSQLStatementOnSpans() {
+  optedInPII = false;
 }
 
 // startSpan synchronously returns a span to avoid the dramatic

@@ -533,12 +533,14 @@ class Spanner extends GrpcService {
     if (!name) {
       const msg = 'A name is required to create an instance';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError(msg);
     }
     if (!config) {
       const msg = 'A configuration object is required to create an instance';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
@@ -561,6 +563,7 @@ class Spanner extends GrpcService {
     if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
       const msg = 'Only one of nodeCount or processingUnits can be specified';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
@@ -940,6 +943,7 @@ class Spanner extends GrpcService {
     if (!name) {
       const msg = 'A name is required to create an instance config.';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError(msg);
     }
@@ -947,6 +951,7 @@ class Spanner extends GrpcService {
       const msg =
         'A configuration object is required to create an instance config.';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
