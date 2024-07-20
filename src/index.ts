@@ -85,6 +85,7 @@ import {
   promisifyAll,
   startTrace,
   setSpanError,
+  addAutoInstrumentation,
 } from './instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -2106,6 +2107,7 @@ export {MutationSet};
  */
 import * as protos from '../protos/protos';
 import IInstanceConfig = instanceAdmin.spanner.admin.instance.v1.IInstanceConfig;
+export {addAutoInstrumentation};
 export {v1, protos};
 export default {Spanner};
 export {Float32, Float, Int, Struct, Numeric, PGNumeric, SpannerDate};

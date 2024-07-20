@@ -75,11 +75,13 @@ Notes and requests from peer review:
     please see https://github.com/googleapis/java-spanner?tab=readme-ov-file#opentelemetry-configuration.
 */
 
-export function addAutoInstrumentation(opts: {
-  grpc?: boolean;
+interface autoInstrumentOpts {
+  grpc: boolean;
   http: boolean;
-  traceProvider: typeof TracerProvider;
-}) {
+  tracerProvider: typeof TracerProvider;
+}
+
+export function addAutoInstrumentation(opts: autoInstrumentOpts) {
   const instrumentations: (typeof Instrumentation)[] = [];
 
   if (opts.grpc) {
@@ -93,9 +95,9 @@ export function addAutoInstrumentation(opts: {
     return;
   }
 
-  if (opts.traceProvider) {
+  if (opts.tracerProvider) {
     instrumentations.forEach(instrumentation => {
-      instrumentation.setTraceProvider(opts.traceProvider);
+      instrumentation.setTracerProvider(opts.tracerProvider);
       instrumentation.enable();
     });
   } else {
