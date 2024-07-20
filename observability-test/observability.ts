@@ -28,8 +28,13 @@ const {
   disableContextAndManager,
   setGlobalContextManager,
   startTrace,
+  optInForSQLStatementOnSpans,
+  optOutOfSQLStatementOnSpans,
 } = require('../src/instrument');
-const {SEMATTRS_DB_SYSTEM} = require('@opentelemetry/semantic-conventions');
+const {
+  SEMATTRS_DB_STATEMENT,
+  SEMATTRS_DB_SYSTEM,
+} = require('@opentelemetry/semantic-conventions');
 
 const {ContextManager} = require('@opentelemetry/api');
 const {
@@ -217,10 +222,54 @@ describe('Testing spans produced', () => {
       assert.equal(
         span.attributes[SEMATTRS_DB_SYSTEM],
         'google.cloud.spanner',
-        'Missing DB_SYSTEM attribute'
+        'Invalid DB_SYSTEM attribute'
       );
     });
   });
+
+  const methodsTakingSQL = {
+    'cloud.google.com/nodejs/spanner/Database.run': true,
+    'cloud.google.com/nodejs/spanner/Transaction.runStream': true,
+  };
+
+  it('Opt-ing into PII-risk SQL annotation on spans works', async () => {
+    optInForSQLStatementOnSpans();
+
+    const {Spanner} = require('../src');
+    const spanner = new Spanner({
+      projectId: projectId,
+    });
+    const instance = spanner.instance('test-instance');
+    const databaseAdminClient = spanner.getDatabaseAdminClient();
+
+    const database = instance.database('test-db');
+
+    const query = {sql: 'SELECT CURRENT_TIMESTAMP()'};
+    const [rows] = await database.run(query);
+
+    await new Promise((resolve, reject) => setTimeout(resolve, 5850));
+    await exporter.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    assert.strictEqual(rows.length, 1);
+
+    // Ensure that each span has the attribute
+    //  SEMATTRS_DB_SYSTEM, set to 'google.cloud.spanner'
+    spans.forEach(span => {
+      if (!methodsTakingSQL[span.name]) {
+        return;
+      }
+
+      const got = span.attributes[SEMATTRS_DB_STATEMENT];
+      const want = query.sql;
+      assert.strictEqual(
+        got,
+        want,
+        `${span.name} has Invalid DB_STATEMENT attribute\n\tGot:  ${got}\n\tWant: ${want}`
+      );
+    });
+  });
+
   it('Using SessionPool.ping does not create any new spans', () => {});
 
   it('Closing the client creates spans', () => {});

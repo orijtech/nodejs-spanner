@@ -14,7 +14,7 @@
 
 'use strict';
 
-function exportSpans(instanceId, databaseId, projectId) {
+async function exportSpans(instanceId, databaseId, projectId) {
   // [START spanner_export_traces]
   // Imports the Google Cloud client library and OpenTelemetry libraries for exporting traces.
   // [START setup_tracer]
@@ -43,10 +43,8 @@ function exportSpans(instanceId, databaseId, projectId) {
   );
 
   const options = {serviceName: 'nodejs-spanner'};
-  const {
-    TraceExporter,
-  } = require('@google-cloud/opentelemetry-cloud-trace-exporter');
-  const exporter = new TraceExporter({});
+  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
+  const exporter = new ZipkinExporter({});
 
   const sdk = new NodeSDK({
     resource: resource,
@@ -74,23 +72,25 @@ function exportSpans(instanceId, databaseId, projectId) {
   // const instanceId = 'my-instance';
   // const databaseId = 'my-database';
 
+  // Creates a client
+  const spanner = new Spanner({
+    projectId: projectId,
+  });
+
+  // Gets a reference to a Cloud Spanner instance and database
+  const instance = spanner.instance(instanceId);
+  const database = instance.database(databaseId);
+  const databaseAdminClient = spanner.getDatabaseAdminClient();
+
+  const databasePath = databaseAdminClient.databasePath(
+    projectId,
+    instanceId,
+    databaseId
+  );
+
+  await new Promise((resolve, reject) => setTimeout(resolve, 5000));
+
   tracer.startActiveSpan('deleteAndCreateDatabase', span => {
-    // Creates a client
-    const spanner = new Spanner({
-      projectId: projectId,
-    });
-
-    // Gets a reference to a Cloud Spanner instance and database
-    const instance = spanner.instance(instanceId);
-    const database = instance.database(databaseId);
-    const databaseAdminClient = spanner.getDatabaseAdminClient();
-
-    const databasePath = databaseAdminClient.databasePath(
-      projectId,
-      instanceId,
-      databaseId
-    );
-
     deleteDatabase(databaseAdminClient, databasePath, () => {
       createDatabase(
         databaseAdminClient,
@@ -119,10 +119,14 @@ function exportSpans(instanceId, databaseId, projectId) {
             }
 
             span.end();
+            await new Promise((resolve, reject) => setTimeout(resolve, 300));
             spanner.close();
-            setTimeout(() => {
-              console.log('finished delete and creation of the database');
-            }, 8000);
+            await exporter.forceFlush();
+            await new Promise((resolve, reject) =>
+              setTimeout(() => {
+                console.log('finished delete and creation of the database');
+              }, 9000)
+            );
           });
         }
       );
@@ -378,6 +382,11 @@ function createDatabase(
   callback
 ) {
   async function doCreateDatabase() {
+    if (databaseId) {
+      callback();
+      return;
+    }
+
     // Create the database with default tables.
     const createSingersTableStatement = `
       CREATE TABLE Singers (
@@ -410,6 +419,11 @@ function createDatabase(
 
 function deleteDatabase(databaseAdminClient, databasePath, callback) {
   async function doDropDatabase() {
+    if (databasePath) {
+      callback();
+      return;
+    }
+
     const [operation] = await databaseAdminClient.dropDatabase({
       database: databasePath,
     });
