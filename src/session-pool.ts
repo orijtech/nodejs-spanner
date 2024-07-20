@@ -24,7 +24,7 @@ import {Transaction} from './transaction';
 import {NormalCallback} from './common';
 import {GoogleError, grpc, ServiceError} from 'google-gax';
 import trace = require('stack-trace');
-import {startTrace, setSpanError} from './instrument';
+import {getActiveOrNoopSpan, setSpanError} from './instrument';
 
 /**
  * @callback SessionPoolCloseCallback
@@ -631,13 +631,12 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @returns {Promise<Session>}
    */
   async _acquire(): Promise<Session> {
-    const span = startTrace('SessionPool.acquireSession');
+    const span = getActiveOrNoopSpan();
     if (!this.isOpen) {
       span.addEvent('session pool is not open');
       const err = new GoogleError(errors.Closed);
       span.recordException(err);
       setSpanError(span, err);
-      span.end();
       throw err;
     }
 
@@ -653,7 +652,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
 
       if (elapsed >= timeout!) {
         span.recordException('timed out');
-        span.end();
         throw new GoogleError(errors.Timeout);
       }
 
@@ -674,7 +672,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     const session = await this._acquires.add(getSession);
     this._prepareTransaction(session);
     this._traces.set(session.id, frames);
-    span.end();
     return session;
   }
 
@@ -700,11 +697,10 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @return {Session}
    */
   _borrowFrom(): Session {
-    const span = startTrace('SessionPool.borrowFromInventory');
+    const span = getActiveOrNoopSpan();
     const session = this._inventory.sessions.pop()!;
     span.addEvent('popped session from inventory');
     this._inventory.borrowed.add(session);
-    span.end();
     return session;
   }
 
@@ -740,14 +736,13 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @emits SessionPool#createError
    */
   async _createSessions(amount: number): Promise<void> {
-    const span = startTrace('SessionPool.createSessions');
+    const span = getActiveOrNoopSpan();
     span.setAttribute('session.requested.count', amount);
 
     const labels = this.options.labels!;
     const databaseRole = this.options.databaseRole!;
 
     if (amount <= 0) {
-      span.end();
       return;
     }
     this._pending += amount;
@@ -772,7 +767,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
         this.emit('createError', e);
         span.recordException(e as Error);
         setSpanError(span, e as Error);
-        span.end();
         throw e;
       }
 
@@ -786,8 +780,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
       });
       span.addEvent(`finished adding ${amount} sessions to the inventory`);
     }
-
-    span.end();
   }
 
   /**
@@ -801,7 +793,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @returns {Promise}
    */
   async _destroy(session: Session): Promise<void> {
-    const span = startTrace('SessionPool.destroySession');
+    const span = getActiveOrNoopSpan();
 
     try {
       await this._requests.add(() => session.delete());
@@ -809,8 +801,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
       this.emit('error', e);
       span.recordException(e as Error);
       setSpanError(span, e as Error);
-    } finally {
-      span.end();
     }
   }
 
@@ -901,11 +891,12 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @returns {Promise<Session>}
    */
   async _getSession(startTime: number): Promise<Session> {
-    const span = startTrace('SessionPool.getSession');
+    const span = getActiveOrNoopSpan();
+    span.addEvent('Attempting to get session');
+
     if (this._hasSessionUsableFor()) {
       span.addEvent('Cache hit: has usable session');
       const sessPromise = this._borrowNextAvailableSession();
-      span.end();
       return sessPromise;
     }
 
@@ -928,7 +919,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
         const onceCloseListener = () => {
           const err = new GoogleError(errors.Closed);
           setSpanError(span, err);
-          span.end();
           reject(err);
         };
         this.once('close', onceCloseListener);
@@ -973,6 +963,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     // Only create a new session if there are more waiters than sessions already
     // being created. The current requester will be waiter number _numWaiters+1.
     if (!this.isFull && this.totalPending <= this.totalWaiters) {
+      span.addEvent('pool is not full and more waiters than sessions');
       let amount = this.options.incStep
         ? this.options.incStep
         : DEFAULTS.incStep!;
@@ -1028,9 +1019,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
       removeTimeoutListener();
     }
 
-    const sessPromise = this._borrowNextAvailableSession();
-    span.end();
-    return sessPromise;
+    return this._borrowNextAvailableSession();
   }
 
   /**
@@ -1058,6 +1047,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     // NOTE: Please do not trace Ping as it gets quite spammy
     // with many root spans polluting the main span.
     // Please see https://github.com/googleapis/google-cloud-go/issues/1691
+
     this._borrow(session);
 
     if (!this._isValidSession(session)) {
@@ -1098,7 +1088,8 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @param {object} options The transaction options.
    */
   _prepareTransaction(session: Session): void {
-    const span = startTrace('SessionPool.prepareTransaction');
+    const span = getActiveOrNoopSpan();
+    span.addEvent('creating transaction for session');
     const transaction = session.transaction(
       (session.parent as Database).queryOptions_
     );
@@ -1107,7 +1098,6 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
       'session.id': session.id.toString(),
       'transaction.id': transaction.id?.toString(),
     });
-    span.end();
   }
 
   /**
@@ -1122,6 +1112,9 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
    * @param {Session} session The session object.
    */
   _release(session: Session): void {
+    const span = getActiveOrNoopSpan();
+    span.addEvent('releasing session back to the pool');
+
     this._inventory.sessions.push(session);
     this._inventory.borrowed.delete(session);
     this._traces.delete(session.id);
@@ -1130,6 +1123,7 @@ export class SessionPool extends EventEmitter implements SessionPoolInterface {
     this.emit('session-available');
     this.emit('readonly-available');
     this.emit('readwrite-available');
+    span.addEvent('released session back to the pool');
   }
 
   /**

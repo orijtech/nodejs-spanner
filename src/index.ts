@@ -80,7 +80,12 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
-import {promisifyAll, startTrace, setSpanError} from './instrument';
+import {
+  getActiveOrNoopSpan,
+  promisifyAll,
+  startTrace,
+  setSpanError,
+} from './instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');
@@ -959,6 +964,7 @@ class Spanner extends GrpcService {
       const msg =
         'Base instance config is required to create an instance config.';
       setSpanError(span, msg);
+      span.recordException(msg);
       span.end();
       throw new GoogleError([msg].join(''));
     }
@@ -1526,16 +1532,17 @@ class Spanner extends GrpcService {
    * @param {function} callback Callback function
    */
   prepareGapicRequest_(config, callback) {
-    const span = startTrace('Spanner.prepareGapicRequest');
+    const span = getActiveOrNoopSpan();
+    span.addEvent('prepareGapicRequest');
 
     this.auth.getProjectId((err, projectId) => {
       if (err) {
         span.addEvent('failed to correctly retrieve the projectId');
         setSpanError(span, err);
-        span.end();
         callback(err);
         return;
       }
+
       const clientName = config.client;
       if (!this.clients_.has(clientName)) {
         this.clients_.set(clientName, new v1[clientName](this.options));
@@ -1582,27 +1589,7 @@ class Spanner extends GrpcService {
         })
       );
 
-      // Wrap resultFn with a function that'll invoke span.end() once
-      // resultFn's results are returned for proper tracing.
-      callback(null, (...args) => {
-        const result = requestFn(...args);
-        if (!result) {
-          span.end();
-          return result;
-        }
-
-        if (typeof result.on !== 'function') {
-          span.end();
-        } else {
-          finished(result, err => {
-            if (err) {
-              setSpanError(span, err);
-            }
-            span.end();
-          });
-        }
-        return result;
-      });
+      callback(null, requestFn);
     });
   }
 

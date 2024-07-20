@@ -675,7 +675,6 @@ class Database extends common.GrpcServiceObject {
     const headers = this.resourceHeader_;
     if (this._getSpanner().routeToLeaderEnabled) {
       addLeaderAwareRoutingHeader(headers);
-      span.addEvent('leaderAwareRouting header added');
     }
 
     this.request<google.spanner.v1.IBatchCreateSessionsResponse>(

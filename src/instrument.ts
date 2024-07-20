@@ -45,6 +45,13 @@ import {
   SpanStatusCode,
   context,
   trace,
+  INVALID_SPAN_CONTEXT,
+  SpanAttributes,
+  TimeInput,
+  Link,
+  Exception,
+  SpanContext,
+  SpanStatus,
 } from '@opentelemetry/api';
 
 export type Span_ = Span;
@@ -54,6 +61,19 @@ let optedInPII: boolean = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 interface SQLStatement {
   sql: string;
 }
+
+/*
+-------------------------------------------------------
+Notes and requests from peer review:
+-------------------------------------------------------
+* TODO: Allow the TracerProvider to be explicitly
+    added to receive Cloud Spanner traces.
+* TODO: Overkill to instrument all the sessionPool
+        methods and avoid adding too many, use discretion.
+* TODO: Read Java Spanner to find the nodeTracerProvider
+    and find out how they inject it locally or use it globally
+    please see https://github.com/googleapis/java-spanner?tab=readme-ov-file#opentelemetry-configuration.
+*/
 
 export function addAutoInstrumentation(opts: {
   grpc?: boolean;
@@ -135,7 +155,7 @@ export function startTrace(
 }
 
 export function setSpanError(span: Span, err: Error | String) {
-  if (!err) {
+  if (!err || !span) {
     return;
   }
 
@@ -350,4 +370,62 @@ export function setGlobalContextManager(manager: ContextManager) {
 export function disableContextAndManager(manager: typeof ContextManager) {
   manager.disable();
   context.disable();
+}
+
+// getActiveOrNoopSpan queries the tracer for the currently active span
+// and returns it, otherwise if there is no active span available, it'll
+// simply create a NoopSpan. This is important in the cases where we don't
+// want to create a new span such is sensitive and frequently called code
+// for which the new spans would be too many and thus pollute the trace,
+// but yet we'd like to record an important annotation.
+export function getActiveOrNoopSpan(): Span {
+  const span = trace.getActiveSpan();
+  if (span) {
+    return span;
+  }
+  return new noopSpan();
+}
+
+class noopSpan implements Span {
+  constructor() {}
+
+  spanContext(): SpanContext {
+    return INVALID_SPAN_CONTEXT;
+  }
+
+  setAttribute(key: string, value: unknown): this {
+    return this;
+  }
+
+  setAttributes(attributes: SpanAttributes): this {
+    return this;
+  }
+
+  addEvent(name: string, attributes?: SpanAttributes): this {
+    return this;
+  }
+
+  addLink(link: Link): this {
+    return this;
+  }
+
+  addLinks(links: Link[]): this {
+    return this;
+  }
+
+  setStatus(status: SpanStatus): this {
+    return this;
+  }
+
+  end(endTime?: TimeInput): void {}
+
+  isRecording(): boolean {
+    return false;
+  }
+
+  recordException(exc: Exception, timeAt?: TimeInput): void {}
+
+  updateName(name: string): this {
+    return this;
+  }
 }
