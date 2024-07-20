@@ -125,7 +125,7 @@ class BatchTransaction extends Snapshot {
    * region_tag:spanner_batch_client
    */
   createQueryPartitions(query, callback) {
-    const span = startTrace('BatchTransaction.createQueryPartitions');
+    const span = startTrace('BatchTransaction.createQueryPartitions', query);
     if (is.string(query)) {
       query = {
         sql: query,

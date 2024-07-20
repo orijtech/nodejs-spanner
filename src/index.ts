@@ -430,6 +430,7 @@ class Spanner extends GrpcService {
       }
       client.close();
     });
+    span.end();
   }
 
   /**

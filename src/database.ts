@@ -3356,8 +3356,8 @@ class Database extends common.GrpcServiceObject {
     this.pool_.getSession((err, session) => {
       if (err) {
         setSpanError(span, err);
-        span.end();
         proxyStream.destroy(err);
+        span.end();
         return;
       }
       const gaxOpts = extend(true, {}, options?.gaxOptions);
