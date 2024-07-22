@@ -18,10 +18,6 @@ import {
   SEMATTRS_DB_SQL_TABLE,
 } from '@opentelemetry/semantic-conventions';
 
-// Ensure that the auto-instrumentation for gRPC & HTTP generates
-// traces that'll be displayed along with the spans we've created.
-const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
-const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
 const {TracerProvider} = require('@opentelemetry/sdk-trace-node');
 
 // Optional instrumentation that the user will configure if they'd like to.
@@ -75,44 +71,6 @@ Notes and requests from peer review:
     and find out how they inject it locally or use it globally
     please see https://github.com/googleapis/java-spanner?tab=readme-ov-file#opentelemetry-configuration.
 */
-
-interface autoInstrumentOpts {
-  grpc: boolean;
-  http: boolean;
-  tracerProvider: typeof TracerProvider;
-}
-
-// addAutoInstrumentation if used MUST be initialized before
-// you create the Cloud Spanner client which sets up the
-// gRPC transport clients.
-export function addAutoInstrumentation(opts: autoInstrumentOpts) {
-  const instrumentations: (typeof Instrumentation)[] = [];
-
-  if (opts.grpc) {
-    instrumentations.push(new GrpcInstrumentation());
-  }
-  if (opts.http) {
-    instrumentations.push(new HttpInstrumentation());
-  }
-
-  if (instrumentations.length <= 0) {
-    return () => {};
-  }
-
-  if (opts.tracerProvider) {
-    instrumentations.forEach(instrumentation => {
-      instrumentation.enable();
-      instrumentation.setTracerProvider(opts.tracerProvider);
-    });
-    return () => {
-      instrumentations.forEach(ins => ins.disable());
-    };
-  } else {
-    return registerInstrumentations({
-      instrumentations: instrumentations,
-    });
-  }
-}
 
 let defaultTracerProvider: typeof TracerProvider = undefined;
 

@@ -23,7 +23,6 @@ const {
 } = require('@opentelemetry/sdk-trace-node');
 const {SimpleSpanProcessor} = require('@opentelemetry/sdk-trace-base');
 const {
-  addAutoInstrumentation,
   disableContextAndManager,
   setGlobalContextManager,
   startTrace,
@@ -226,13 +225,9 @@ describe('Always off sampler used', () => {
   });
 
   it('Querying with gRPC enabled', async () => {
-    const doneFn = addAutoInstrumentation({grpc: true});
-
     const query = {sql: 'SELECT 1'};
     const [rows] = await database.run(query);
     assert.strictEqual(rows.length, 1);
-
-    doneFn();
 
     const spans = exporter.getFinishedSpans();
     assert.strictEqual(spans.length, 0, 'no spans should be exported');
@@ -251,6 +246,9 @@ describe('Always off sampler used', () => {
 });
 
 describe('Enabled gRPC instrumentation with sampling on', () => {
+  const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+  const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
+
   const exporter = new InMemorySpanExporter();
   const sampler = new AlwaysOnSampler();
 
@@ -258,14 +256,14 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
   let contextManager: typeof ContextManager;
 
   beforeEach(() => {
+    registerInstrumentations({
+      instrumentations: [new GrpcInstrumentation()],
+    });
     provider = new NodeTracerProvider({
       sampler: sampler,
-      exporter: exporter,
     });
     provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
     provider.register();
-    setTracerProvider(provider);
-    addAutoInstrumentation({grpc: true, tracerProvider: provider});
 
     contextManager = new AsyncHooksContextManager();
     setGlobalContextManager(contextManager);
@@ -283,15 +281,16 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
 
   it('Invoking database methods creates spans: gRPC enabled', async () => {
     const {Spanner} = require('../src');
+    setTracerProvider(provider);
     const spanner = new Spanner({
       projectId: projectId,
     });
     const instance = spanner.instance('test-instance');
     const database = instance.database('test-db');
-
     const query = {sql: 'SELECT 1'};
     const [rows] = await database.run(query);
     assert.strictEqual(rows.length, 1);
+    database.close();
     spanner.close();
 
     const spans = exporter.getFinishedSpans();
@@ -310,11 +309,14 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
     });
 
     const want = [
+      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
+      'cloud.google.com/nodejs/spanner/Spanner.batchCreateSessions',
       'grpc.google.spanner.v1.Spanner/ExecuteStreamingSql',
       'cloud.google.com/nodejs/spanner/Database.runStream',
       'cloud.google.com/nodejs/spanner/Database.run',
       'cloud.google.com/nodejs/spanner/Spanner.run',
       'cloud.google.com/nodejs/spanner/Transaction.runStream',
+      'cloud.google.com/nodejs/spanner/Spanner.close',
     ];
 
     assert.deepEqual(

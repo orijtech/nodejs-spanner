@@ -85,7 +85,6 @@ import {
   promisifyAll,
   startTrace,
   setSpanError,
-  addAutoInstrumentation,
   setTracerProvider,
 } from './instrument';
 
@@ -2109,7 +2108,7 @@ export {MutationSet};
  */
 import * as protos from '../protos/protos';
 import IInstanceConfig = instanceAdmin.spanner.admin.instance.v1.IInstanceConfig;
-export {addAutoInstrumentation, setTracerProvider};
+export {setTracerProvider};
 export {v1, protos};
 export default {Spanner};
 export {Float32, Float, Int, Struct, Numeric, PGNumeric, SpannerDate};
