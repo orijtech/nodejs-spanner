@@ -52,6 +52,7 @@ import {
   Exception,
   SpanContext,
   SpanStatus,
+  SpanKind,
 } from '@opentelemetry/api';
 
 export type Span_ = Span;
@@ -81,6 +82,9 @@ interface autoInstrumentOpts {
   tracerProvider: typeof TracerProvider;
 }
 
+// addAutoInstrumentation if used MUST be initialized before
+// you create the Cloud Spanner client which sets up the
+// gRPC transport clients.
 export function addAutoInstrumentation(opts: autoInstrumentOpts) {
   const instrumentations: (typeof Instrumentation)[] = [];
 
@@ -92,27 +96,46 @@ export function addAutoInstrumentation(opts: autoInstrumentOpts) {
   }
 
   if (instrumentations.length <= 0) {
-    return;
+    return () => {};
   }
 
   if (opts.tracerProvider) {
     instrumentations.forEach(instrumentation => {
-      instrumentation.setTracerProvider(opts.tracerProvider);
       instrumentation.enable();
+      instrumentation.setTracerProvider(opts.tracerProvider);
     });
+    return () => {
+      instrumentations.forEach(ins => ins.disable());
+    };
   } else {
-    registerInstrumentations({
+    return registerInstrumentations({
       instrumentations: instrumentations,
     });
   }
 }
 
-// initTracer fetches the tracer each time that it is invoked to solve
+let defaultTracerProvider: typeof TracerProvider = undefined;
+
+// setTracerProvider allows the caller to hook up an OpenTelemetry
+// TracerProvider that spans shall be attached to, instead of using
+// the global configuration. Later on if `getTracer` is invoked and
+// the default tracerProvider is unset, it'll use the global tracer
+// otherwise it'll use the set TracerProvider.
+export function setTracerProvider(freshTracerProvider: typeof TracerProvider) {
+  defaultTracerProvider = freshTracerProvider;
+}
+
+// getTracer fetches the tracer each time that it is invoked to solve
 // the problem of observability being initialized after Spanner objects
 // have been already created.
-export function initTracer() {
+export function getTracer() {
+  if (defaultTracerProvider) {
+    return defaultTracerProvider.getTracer('nodejs-spanner');
+  }
+  // Otherwise use the global tracer still named 'nodejs-spanner'
   return trace.getTracer('nodejs-spanner');
 }
+
 export function optInForSQLStatementOnSpans() {
   optedInPII = true;
 }
@@ -121,7 +144,7 @@ export function optOutOfSQLStatementOnSpans() {
   optedInPII = false;
 }
 
-// startSpan synchronously returns a span to avoid the dramatic
+// startTrace synchronously returns a span to avoid the dramatic
 // scope change in which trying to use tracer.startActiveSpan
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
@@ -130,8 +153,9 @@ export function startTrace(
   sql?: string | SQLStatement,
   tableName?: string
 ): Span {
-  const span = initTracer().startSpan(
-    'cloud.google.com/nodejs/spanner/' + spanNameSuffix
+  const span = getTracer().startSpan(
+    'cloud.google.com/nodejs/spanner/' + spanNameSuffix,
+    {kind: SpanKind.CLIENT}
   );
 
   span.setAttribute(SEMATTRS_DB_SYSTEM, 'google.cloud.spanner');
