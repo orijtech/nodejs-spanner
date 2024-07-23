@@ -250,11 +250,11 @@ export function promisify(
 
   const slice = Array.prototype.slice;
 
+  // tslint:disable-next-line:no-any
   const wrapper: any = function (this: typeof WithPromise) {
-    const span = startTrace('Spanner.' + originalMethod.name);
-
-    // tslint:disable-next-line:no-any
     let last;
+
+    const span = startTrace('Spanner.' + originalMethod.name);
 
     for (last = arguments.length - 1; last >= 0; last--) {
       const arg = arguments[last];
@@ -291,9 +291,8 @@ export function promisify(
 
         if (err) {
           setSpanError(span, err);
-          const result = reject(err);
           span.end();
-          return result;
+          return reject(err);
         }
 
         if (options!.singular && callbackArgs.length === 1) {

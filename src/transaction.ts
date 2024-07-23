@@ -21,7 +21,7 @@ import {EventEmitter} from 'events';
 import {grpc, CallOptions, ServiceError, Status, GoogleError} from 'google-gax';
 import * as is from 'is';
 import {common as p} from 'protobufjs';
-import {finished, Readable, PassThrough} from 'stream';
+import {finished, Readable, PassThrough, Stream} from 'stream';
 
 import {codec, Json, JSONOptions, Type, Value} from './codec';
 import {
@@ -1214,6 +1214,8 @@ export class Snapshot extends EventEmitter {
           sanitizeRequest();
         } catch (e) {
           const errorStream = new PassThrough();
+          setSpanError(span, e as Error);
+          span.recordException(e as Error);
           setImmediate(() => errorStream.destroy(e as Error));
           return errorStream;
         }
@@ -1235,7 +1237,7 @@ export class Snapshot extends EventEmitter {
       columnsMetadata,
       gaxOptions,
     })
-      .on('response', response => {
+      ?.on('response', response => {
         if (response.metadata && response.metadata!.transaction && !this.id) {
           this._update(response.metadata!.transaction);
         }
@@ -1246,12 +1248,14 @@ export class Snapshot extends EventEmitter {
         }
       });
 
-    finished(prs, err => {
-      if (err) {
-        setSpanError(span, err);
-      }
-      span.end();
-    });
+    if (prs instanceof Stream) {
+      finished(prs, err => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
+      });
+    }
 
     return prs;
   }
