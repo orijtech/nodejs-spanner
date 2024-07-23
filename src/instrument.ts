@@ -56,8 +56,6 @@ Notes and requests from peer review:
 -------------------------------------------------------
 * TODO: Allow the TracerProvider to be explicitly
     added to receive Cloud Spanner traces.
-* TODO: Overkill to instrument all the sessionPool
-        methods and avoid adding too many, use discretion.
 * TODO: Read Java Spanner to find the nodeTracerProvider
     and find out how they inject it locally or use it globally
     please see https://github.com/googleapis/java-spanner?tab=readme-ov-file#opentelemetry-configuration.
@@ -85,6 +83,10 @@ export function getTracer() {
   return trace.getTracer('nodejs-spanner');
 }
 
+// optInForSQLStatementOnSpans is a configurable knob that if
+// invoked allows spans to be annotated with the SQL statement
+// of the producing function; if optOutofSQLStatementOnSpans
+// is invoked the SQL statement annotation shall be dropped.
 export function optInForSQLStatementOnSpans() {
   optedInPII = true;
 }
@@ -129,6 +131,8 @@ export function startTrace(
   return span;
 }
 
+// setSpanError sets err, if non-nil onto the span with
+// status.code=ERROR and the message of err.toString()
 export function setSpanError(span: Span, err: Error | String) {
   if (!err || !span) {
     return;
@@ -163,6 +167,10 @@ export function getActiveOrNoopSpan(): Span {
   return new noopSpan();
 }
 
+// noopSpan is a pass-through Span that does nothing and shall not
+// be exported, nor added into any context. It serves as a placeholder
+// to allow calls in sensitive areas like sessionPools to transparently
+// add attributes to spans without lots of ugly null checks.
 class noopSpan implements Span {
   constructor() {}
 
