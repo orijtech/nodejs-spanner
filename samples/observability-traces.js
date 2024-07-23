@@ -73,8 +73,7 @@ async function exportSpans(instanceId, databaseId, projectId) {
   const tracer = provider.getTracer('nodejs-spanner');
   // [END setup_tracer]
 
-  const {Spanner, setTracerProvider} = require('@google-cloud/spanner');
-  setTracerProvider(provider);
+  const {Spanner} = require('@google-cloud/spanner');
 
   /**
    * TODO(developer): Uncomment the following lines before running the sample.
@@ -86,6 +85,10 @@ async function exportSpans(instanceId, databaseId, projectId) {
   // Creates a client
   const spanner = new Spanner({
     projectId: projectId,
+    observability: {
+      tracerProvider: provider,
+      enableExtendedTracing: true,
+    },
   });
 
   // Gets a reference to a Cloud Spanner instance and database

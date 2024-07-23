@@ -42,12 +42,33 @@ import {
   SpanKind,
 } from '@opentelemetry/api';
 
-export type Span_ = Span;
-
 let optedInPII: boolean = process.env.SPANNER_NODEJS_ANNOTATE_PII_SQL === '1';
 
 interface SQLStatement {
   sql: string;
+}
+
+interface observabilityOptions {
+  tracerProvider: typeof TracerProvider;
+  enableExtendedTracing: boolean;
+}
+
+export type {observabilityOptions as ObservabilityOptions};
+
+export function applyObservabilityOptions(
+  opts: observabilityOptions | undefined
+) {
+  if (!opts) {
+    return;
+  }
+
+  if (opts.tracerProvider) {
+    setTracerProvider(opts.tracerProvider);
+  }
+
+  if (opts.enableExtendedTracing) {
+    optInForSQLStatementOnSpans();
+  }
 }
 
 /*
@@ -64,23 +85,28 @@ Notes and requests from peer review:
 let defaultTracerProvider: typeof TracerProvider = undefined;
 
 // setTracerProvider allows the caller to hook up an OpenTelemetry
-// TracerProvider that spans shall be attached to, instead of using
-// the global configuration. Later on if `getTracer` is invoked and
+// TracerProvider that spans generated from this library shall be attached to,
+// instead of using the global configuration. Later on if `getTracer` is invoked and
 // the default tracerProvider is unset, it'll use the global tracer
 // otherwise it'll use the set TracerProvider.
 export function setTracerProvider(freshTracerProvider: typeof TracerProvider) {
   defaultTracerProvider = freshTracerProvider;
 }
 
+const TRACER_NAME = 'nodejs-spanner';
+
 // getTracer fetches the tracer each time that it is invoked to solve
 // the problem of observability being initialized after Spanner objects
 // have been already created.
-export function getTracer() {
+export function getTracer(config?: traceConfig) {
+  if (config && config.opts && config.opts.tracerProvider) {
+    return config.opts.tracerProvider.getTracer(TRACER_NAME);
+  }
   if (defaultTracerProvider) {
-    return defaultTracerProvider.getTracer('nodejs-spanner');
+    return defaultTracerProvider.getTracer(TRACER_NAME);
   }
   // Otherwise use the global tracer still named 'nodejs-spanner'
-  return trace.getTracer('nodejs-spanner');
+  return trace.getTracer(TRACER_NAME);
 }
 
 // optInForSQLStatementOnSpans is a configurable knob that if
@@ -95,27 +121,40 @@ export function optOutOfSQLStatementOnSpans() {
   optedInPII = false;
 }
 
+interface traceConfig {
+  sql?: string | SQLStatement;
+  tableName?: string;
+  opts?: observabilityOptions;
+  enableExtendedTracing?: boolean;
+}
+
 // startTrace synchronously returns a span to avoid the dramatic
 // scope change in which trying to use tracer.startActiveSpan
 // would change the meaning of this, and also introduction of callbacks
 // would radically change all the code structures making it more invasive.
 export function startTrace(
   spanNameSuffix: string,
-  sql?: string | SQLStatement,
-  tableName?: string
+  opts?: traceConfig | undefined
 ): Span {
-  const span = getTracer().startSpan(
+  const origOpts = opts;
+  opts = opts || {};
+  if (typeof origOpts === 'string') {
+    opts.sql = origOpts as string;
+  }
+
+  const span = getTracer(opts).startSpan(
     'cloud.google.com/nodejs/spanner/' + spanNameSuffix,
     {kind: SpanKind.CLIENT}
   );
 
   span.setAttribute(SEMATTRS_DB_SYSTEM, 'google.cloud.spanner');
 
-  if (tableName) {
-    span.setAttribute(SEMATTRS_DB_SQL_TABLE, tableName);
+  if (opts.tableName) {
+    span.setAttribute(SEMATTRS_DB_SQL_TABLE, opts.tableName);
   }
 
-  if (optedInPII && sql) {
+  if (opts.sql && (opts.enableExtendedTracing || optedInPII)) {
+    const sql = opts.sql;
     if (typeof sql === 'string') {
       span.setAttribute(SEMATTRS_DB_STATEMENT, sql as string);
     } else {

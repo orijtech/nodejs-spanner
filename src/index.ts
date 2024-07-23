@@ -81,6 +81,8 @@ import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
 import {
+  ObservabilityOptions,
+  applyObservabilityOptions,
   getActiveOrNoopSpan,
   startTrace,
   setSpanError,
@@ -144,7 +146,9 @@ export interface SpannerOptions extends GrpcClientOptions {
   sslCreds?: grpc.ChannelCredentials;
   routeToLeaderEnabled?: boolean;
   directedReadOptions?: google.spanner.v1.IDirectedReadOptions | null;
+  observabilityConfig?: ObservabilityOptions | undefined;
 }
+
 export interface RequestConfig {
   client: string;
   method: string;
@@ -306,6 +310,7 @@ class Spanner extends GrpcService {
         }
       }
     }
+
     options = Object.assign(
       {
         libName: 'gccl',
@@ -335,6 +340,7 @@ class Spanner extends GrpcService {
       options.port = emulatorHost.port;
       options.sslCreds = grpc.credentials.createInsecure();
     }
+
     const config = {
       baseUrl:
         options.apiEndpoint ||
@@ -368,6 +374,7 @@ class Spanner extends GrpcService {
       [CLOUD_RESOURCE_HEADER]: this.projectFormattedName_,
     };
     this.directedReadOptions = directedReadOptions;
+    applyObservabilityOptions(options.observabilityConfig);
   }
 
   /**
@@ -2107,7 +2114,6 @@ export {MutationSet};
  */
 import * as protos from '../protos/protos';
 import IInstanceConfig = instanceAdmin.spanner.admin.instance.v1.IInstanceConfig;
-export {setTracerProvider};
 export {v1, protos};
 export default {Spanner};
 export {Float32, Float, Int, Struct, Numeric, PGNumeric, SpannerDate};
