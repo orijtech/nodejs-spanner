@@ -17,11 +17,11 @@
 import {GrpcService, GrpcServiceConfig} from './common-grpc/service';
 import {PreciseDate} from '@google-cloud/precise-date';
 import {replaceProjectIdToken} from '@google-cloud/projectify';
+import {promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import {GoogleAuth, GoogleAuthOptions} from 'google-auth-library';
 import * as path from 'path';
 import {common as p} from 'protobufjs';
-import {finished} from 'stream';
 import * as streamEvents from 'stream-events';
 import * as through from 'through2';
 import {
@@ -82,7 +82,6 @@ const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
 import {
   getActiveOrNoopSpan,
-  promisifyAll,
   startTrace,
   setSpanError,
   setTracerProvider,
@@ -568,11 +567,11 @@ class Spanner extends GrpcService {
     };
 
     if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
-      const msg = 'Only one of nodeCount or processingUnits can be specified';
+      const msg = 'Only one of nodeCount or processingUnits can be specified.';
       setSpanError(span, msg);
       span.recordException(msg);
       span.end();
-      throw new GoogleError([msg].join(''));
+      throw new GoogleError(msg);
     }
     if (!reqOpts.instance.nodeCount && !reqOpts.instance.processingUnits) {
       // If neither nodes nor processingUnits are specified, default to a
@@ -960,7 +959,7 @@ class Spanner extends GrpcService {
       setSpanError(span, msg);
       span.recordException(msg);
       span.end();
-      throw new GoogleError([msg].join(''));
+      throw new GoogleError(msg);
     }
     if (!config.baseConfig) {
       const msg =

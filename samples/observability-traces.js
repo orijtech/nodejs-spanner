@@ -43,8 +43,19 @@ async function exportSpans(instanceId, databaseId, projectId) {
   );
 
   const options = {serviceName: 'nodejs-spanner'};
-  const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
-  const exporter = new ZipkinExporter({});
+  // const {ZipkinExporter} = require('@opentelemetry/exporter-zipkin');
+  // const exporter = new ZipkinExporter({});
+  const {
+    TraceExporter,
+  } = require('@google-cloud/opentelemetry-cloud-trace-exporter');
+  const exporter = new TraceExporter({});
+
+  const {registerInstrumentations} = require('@opentelemetry/instrumentation');
+  const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
+  const {HttpInstrumentation} = require('@opentelemetry/instrumentation-http');
+  registerInstrumentations({
+    instrumentations: [new GrpcInstrumentation(), new HttpInstrumentation()],
+  });
 
   const sdk = new NodeSDK({
     resource: resource,
@@ -56,15 +67,15 @@ async function exportSpans(instanceId, databaseId, projectId) {
   sdk.start();
 
   const provider = new NodeTracerProvider({resource: resource});
-  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
   provider.register();
 
-  // OpenTelemetry MUST be imported much earlier than the cloud-spanner package.
-  const tracer = trace.getTracer('nodejs-spanner');
+  const tracer = provider.getTracer('nodejs-spanner');
   // [END setup_tracer]
 
-  const {Spanner} = require('@google-cloud/spanner');
+  const {Spanner, setTracerProvider} = require('@google-cloud/spanner');
+  setTracerProvider(provider);
+
   /**
    * TODO(developer): Uncomment the following lines before running the sample.
    */
@@ -118,14 +129,14 @@ async function exportSpans(instanceId, databaseId, projectId) {
               console.error('ERROR:', err);
             }
 
-            span.end();
-            await new Promise((resolve, reject) => setTimeout(resolve, 300));
             spanner.close();
-            await exporter.forceFlush();
+            span.end();
+            // await new Promise((resolve, reject) => setTimeout(resolve, 600));
+            // await exporter.forceFlush();
             await new Promise((resolve, reject) =>
               setTimeout(() => {
                 console.log('finished delete and creation of the database');
-              }, 9000)
+              }, 10000)
             );
           });
         }

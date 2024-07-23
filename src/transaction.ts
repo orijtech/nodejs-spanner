@@ -15,6 +15,7 @@
  */
 
 import {DateStruct, PreciseDate} from '@google-cloud/precise-date';
+import {promisifyAll} from '@google-cloud/promisify';
 import arrify = require('arrify');
 import Long = require('long');
 import {EventEmitter} from 'events';
@@ -44,7 +45,7 @@ import IQueryOptions = google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Database, Spanner} from '.';
 import ReadLockMode = google.spanner.v1.TransactionOptions.ReadWrite.ReadLockMode;
-import {promisifyAll, startTrace, setSpanError} from './instrument';
+import {startTrace, setSpanError} from './instrument';
 
 export type Rows = Array<Row | Json>;
 const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.retryinfo';

@@ -34,9 +34,9 @@ import {
   RequestConfig,
   Spanner,
 } from './index';
+import {promisifyAll} from '@google-cloud/promisify';
 import {CallOptions, grpc} from 'google-gax';
 import extend = require('extend');
-import {promisifyAll} from './instrument';
 
 export type IOperation = instanceAdmin.longrunning.IOperation;
 

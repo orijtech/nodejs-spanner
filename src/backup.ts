@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+import {promisifyAll, callbackifyAll} from '@google-cloud/promisify';
 import {Instance} from './instance';
 import {
   IOperation,
@@ -32,7 +33,6 @@ import {
 import {DateStruct, PreciseDate} from '@google-cloud/precise-date';
 import {google as databaseAdmin} from '../protos/protos';
 import {common as p} from 'protobufjs';
-import {promisifyAll, callbackifyAll} from './instrument';
 
 export type CreateBackupCallback = LongRunningCallback<Backup>;
 export type CopyBackupCallback = LongRunningCallback<Backup>;

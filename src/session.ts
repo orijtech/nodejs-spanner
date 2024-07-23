@@ -20,6 +20,7 @@
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const common = require('./common-grpc/service-object');
+import {promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import * as r from 'teeny-request';
 import {
@@ -43,7 +44,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
-import {promisifyAll, startTrace, setSpanError} from './instrument';
+import {startTrace, setSpanError} from './instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 

@@ -15,6 +15,7 @@
  */
 
 import {PreciseDate} from '@google-cloud/precise-date';
+import {promisifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import * as is from 'is';
 import {Snapshot} from './transaction';
@@ -24,7 +25,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
-import {promisifyAll, startTrace, setSpanError} from './instrument';
+import {startTrace, setSpanError} from './instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;

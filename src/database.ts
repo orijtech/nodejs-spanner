@@ -23,6 +23,7 @@ import {
 } from '@google-cloud/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const common = require('./common-grpc/service-object');
+import {promisify, promisifyAll, callbackifyAll} from '@google-cloud/promisify';
 import * as extend from 'extend';
 import * as r from 'teeny-request';
 import * as streamEvents from 'stream-events';
@@ -104,9 +105,6 @@ import snakeCase = require('lodash.snakecase');
 import {
   startTrace,
   setSpanError,
-  callbackifyAll,
-  promisify,
-  promisifyAll,
 } from './instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
