@@ -105,7 +105,7 @@ export function getTracer(config?: traceConfig) {
   if (defaultTracerProvider) {
     return defaultTracerProvider.getTracer(TRACER_NAME);
   }
-  // Otherwise use the global tracer still named 'nodejs-spanner'
+  // Otherwise use the global tracer.
   return trace.getTracer(TRACER_NAME);
 }
 
