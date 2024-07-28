@@ -116,11 +116,11 @@ describe('Testing spans produced with a sampler on', () => {
     );
 
     // Ensure that each span has the attribute
-    //  SEMATTRS_DB_SYSTEM, set to 'google.cloud.spanner'
+    //  SEMATTRS_DB_SYSTEM, set to 'spanner'
     spans.forEach(span => {
       assert.equal(
         span.attributes[SEMATTRS_DB_SYSTEM],
-        'google.cloud.spanner',
+        'spanner',
         'Missing DB_SYSTEM attribute'
       );
     });
@@ -151,7 +151,7 @@ describe('Testing spans produced with a sampler on', () => {
     assert.ok(spans.length > 0, 'at least 1 span must have been created');
 
     // Ensure that each span has the attribute
-    //  SEMATTRS_DB_SYSTEM, set to 'google.cloud.spanner'
+    //  SEMATTRS_DB_SYSTEM, set to 'spanner'
     spans.forEach(span => {
       if (!methodsTakingSQL[span.name]) {
         return;

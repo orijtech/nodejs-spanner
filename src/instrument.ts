@@ -147,7 +147,7 @@ export function startTrace(
     {kind: SpanKind.CLIENT}
   );
 
-  span.setAttribute(SEMATTRS_DB_SYSTEM, 'google.cloud.spanner');
+  span.setAttribute(SEMATTRS_DB_SYSTEM, 'spanner');
 
   if (opts.tableName) {
     span.setAttribute(SEMATTRS_DB_SQL_TABLE, opts.tableName);

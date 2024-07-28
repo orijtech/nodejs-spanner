@@ -89,12 +89,12 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
     );
 
     // Ensure that each span has the attribute
-    //  SEMATTRS_DB_SYSTEM, set to 'google.cloud.spanner'
+    //  SEMATTRS_DB_SYSTEM, set to 'spanner'
     spans.forEach(span => {
       if (span.name.startsWith('cloud.google.com')) {
         assert.equal(
           span.attributes[SEMATTRS_DB_SYSTEM],
-          'google.cloud.spanner',
+          'spanner',
           'Invalid DB_SYSTEM attribute'
         );
       }
