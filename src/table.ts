@@ -31,6 +31,7 @@ import {
 import {google as databaseAdmin} from '../protos/protos';
 import {Schema, LongRunningCallback} from './common';
 import IRequestOptions = databaseAdmin.spanner.v1.IRequestOptions;
+import {startTrace, setSpanError} from './instrument';
 
 export type Key = string | string[];
 
@@ -1072,6 +1073,7 @@ class Table {
     options: MutateRowsOptions | CallOptions = {},
     callback: CommitCallback
   ): void {
+    const span = startTrace('Table.' + method);
     const requestOptions =
       'requestOptions' in options ? options.requestOptions : {};
 
@@ -1087,10 +1089,13 @@ class Table {
       },
       (err, transaction) => {
         if (err) {
+          setSpanError(span, err);
+          span.end();
           callback(err);
           return;
         }
 
+        span.end();
         transaction![method](this.name, rows as Key[]);
         transaction!.commit(options, callback);
       }

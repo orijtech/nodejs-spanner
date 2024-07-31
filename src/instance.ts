@@ -51,6 +51,7 @@ import {google as instanceAdmin} from '../protos/protos';
 import {google as databaseAdmin} from '../protos/protos';
 import {google as spannerClient} from '../protos/protos';
 import {CreateInstanceRequest} from './index';
+import {startTrace, setSpanError} from './instrument';
 
 export type IBackup = databaseAdmin.spanner.admin.database.v1.IBackup;
 export type IDatabase = databaseAdmin.spanner.admin.database.v1.IDatabase;
@@ -876,9 +877,14 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CreateDatabaseOptions | CreateDatabaseCallback,
     cb?: CreateDatabaseCallback
   ): void | Promise<CreateDatabaseResponse> {
+    const span = startTrace('Instance.createDatabase');
     if (!name) {
-      throw new GoogleError('A name is required to create a database.');
+      const msg = 'A name is required to create a database.';
+      setSpanError(span, msg);
+      span.end();
+      throw new GoogleError(msg);
     }
+
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -921,10 +927,14 @@ class Instance extends common.GrpcServiceObject {
       },
       (err, operation, resp) => {
         if (err) {
+          // TODO: Infer the status and code from translating the error.
+          setSpanError(span, err);
+          span.end();
           callback(err, null, null, resp);
           return;
         }
         const database = this.database(name, poolOptions || poolCtor);
+        span.end();
         callback(null, database, operation, resp);
       }
     );
@@ -1034,6 +1044,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | DeleteInstanceCallback,
     cb?: DeleteInstanceCallback
   ): void | Promise<DeleteInstanceResponse> {
+    const span = startTrace('Instance.delete');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1060,8 +1071,13 @@ class Instance extends common.GrpcServiceObject {
           },
           (err, resp) => {
             if (!err) {
+              // TODO: Create a sub-span about invoking instances_.delete
               this.parent.instances_.delete(this.id);
+            } else {
+              setSpanError(span, err);
             }
+
+            span.end();
             callback!(err, resp!);
           }
         );
@@ -1111,6 +1127,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | ExistsInstanceCallback,
     cb?: ExistsInstanceCallback
   ): void | Promise<ExistsInstanceResponse> {
+    const span = startTrace('Instance.exists');
     const gaxOptions =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1119,12 +1136,18 @@ class Instance extends common.GrpcServiceObject {
     const NOT_FOUND = 5;
 
     this.getMetadata({gaxOptions}, err => {
+      if (err) {
+        setSpanError(span, err);
+      }
+
       if (err && err.code !== NOT_FOUND) {
+        span.end();
         callback!(err, null);
         return;
       }
 
       const exists = !err || err.code !== NOT_FOUND;
+      span.end();
       callback!(null, exists);
     });
   }
@@ -1184,6 +1207,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: GetInstanceConfig | GetInstanceCallback,
     cb?: GetInstanceCallback
   ): void | Promise<GetInstanceResponse> {
+    const span = startTrace('Instance.get');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1200,36 +1224,58 @@ class Instance extends common.GrpcServiceObject {
     }
 
     this.getMetadata(getMetadataOptions, (err, metadata) => {
-      if (err) {
-        if (err.code === 5 && options.autoCreate) {
-          const createOptions = extend(true, {}, options);
-          delete createOptions.fieldNames;
-          delete createOptions.autoCreate;
-          this.create(
-            createOptions,
-            (
-              err: grpc.ServiceError | null,
-              instance?: Instance,
-              operation?: GaxOperation | null
-            ) => {
-              if (err) {
-                callback(err);
-                return;
-              }
-              operation!
-                .on('error', callback)
-                .on('complete', (metadata: IInstance) => {
-                  this.metadata = metadata;
-                  callback(null, this, metadata);
-                });
-            }
-          );
-          return;
-        }
+      if (!err) {
+        span.end();
+        callback(null, this, metadata!);
+        return;
+      }
+
+      // Otherwise an error occurred.
+      setSpanError(span, err);
+
+      if (err.code !== 5 || !options.autoCreate) {
+        span.end();
         callback(err);
         return;
       }
-      callback(null, this, metadata!);
+
+      // Attempt to create the instance.
+      const createOptions = extend(true, {}, options);
+      delete createOptions.fieldNames;
+      delete createOptions.autoCreate;
+      const createSpan = startTrace('Instance.create');
+      this.create(
+        createOptions,
+        (
+          err: grpc.ServiceError | null,
+          instance?: Instance,
+          operation?: GaxOperation | null
+        ) => {
+          if (err) {
+            setSpanError(createSpan, err);
+            createSpan.end();
+            span.end();
+            callback(err);
+            return;
+          }
+
+          // Otherwise attempt the creation operation.
+          operation!
+            .on('error', (err, obj, metadata) => {
+              setSpanError(createSpan, err);
+              createSpan.end();
+              span.end();
+              callback(err, obj, metadata);
+            })
+            .on('complete', (metadata: IInstance) => {
+              this.metadata = metadata;
+              createSpan.end();
+              span.end();
+              callback(null, this, metadata);
+            });
+        }
+      );
+      return;
     });
   }
 
@@ -1313,6 +1359,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: GetDatabasesOptions | GetDatabasesCallback,
     cb?: GetDatabasesCallback
   ): void | Promise<GetDatabasesResponse> {
+    const span = startTrace('Instance.getDatabases');
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const callback =
@@ -1358,7 +1405,9 @@ class Instance extends common.GrpcServiceObject {
         let databases: Database[] | null = null;
         if (rowDatabases) {
           databases = rowDatabases.map(database => {
-            const databaseInstance = self.database(database.name!, {min: 0});
+            const databaseInstance = self.database(database.name!, {
+              min: 0,
+            });
             databaseInstance.metadata = database;
             return databaseInstance;
           });
@@ -1367,6 +1416,11 @@ class Instance extends common.GrpcServiceObject {
           ? extend({}, options, nextPageRequest!)
           : null;
 
+        if (err) {
+          setSpanError(span, err);
+        }
+
+        span.end();
         callback(err, databases, nextQuery, ...args);
       }
     );
@@ -1412,6 +1466,7 @@ class Instance extends common.GrpcServiceObject {
    * ```
    */
   getDatabasesStream(options: GetDatabasesOptions = {}): NodeJS.ReadableStream {
+    // TODO: Instrument this streaming method with Otel.
     const gaxOpts = extend(true, {}, options.gaxOptions);
 
     let reqOpts = extend({}, options, {
@@ -1518,6 +1573,7 @@ class Instance extends common.GrpcServiceObject {
       | GetInstanceMetadataCallback,
     cb?: GetInstanceMetadataCallback
   ): Promise<GetInstanceMetadataResponse> | void {
+    const span = startTrace('Instance.getMetadata');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1539,9 +1595,15 @@ class Instance extends common.GrpcServiceObject {
         headers: this.resourceHeader_,
       },
       (err, resp) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
         if (resp) {
           this.metadata = resp;
         }
+
+        span.end();
         callback!(err, resp);
       }
     );
@@ -1610,6 +1672,7 @@ class Instance extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | SetInstanceMetadataCallback,
     cb?: SetInstanceMetadataCallback
   ): void | Promise<SetInstanceMetadataResponse> {
+    const span = startTrace('Instance.setMetadata');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1634,7 +1697,13 @@ class Instance extends common.GrpcServiceObject {
         gaxOpts,
         headers: this.resourceHeader_,
       },
-      callback!
+      (err, operation, apiResponse) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
+        callback!(err, operation, apiResponse);
+      }
     );
   }
   /**

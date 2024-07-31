@@ -25,6 +25,7 @@ import {
   CLOUD_RESOURCE_HEADER,
   addLeaderAwareRoutingHeader,
 } from '../src/common';
+import {startTrace, setSpanError} from './instrument';
 
 export interface TransactionIdentifier {
   session: string | Session;
@@ -125,6 +126,7 @@ class BatchTransaction extends Snapshot {
    * region_tag:spanner_batch_client
    */
   createQueryPartitions(query, callback) {
+    const span = startTrace('BatchTransaction.createQueryPartitions', query);
     if (is.string(query)) {
       query = {
         sql: query,
@@ -149,7 +151,14 @@ class BatchTransaction extends Snapshot {
         gaxOpts: query.gaxOptions,
         headers: headers,
       },
-      callback
+      (err, partitions, resp) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
+        span.end();
+        callback(err, partitions, resp);
+      }
     );
   }
   /**
@@ -163,6 +172,7 @@ class BatchTransaction extends Snapshot {
    * @param {function} callback Callback function.
    */
   createPartitions_(config, callback) {
+    const span = startTrace('BatchTransaction.createPartitions');
     const query = extend({}, config.reqOpts, {
       session: this.session.formattedName_,
       transaction: {id: this.id},
@@ -174,6 +184,8 @@ class BatchTransaction extends Snapshot {
     delete query.partitionOptions;
     this.session.request(config, (err, resp) => {
       if (err) {
+        setSpanError(span, err);
+        span.end();
         callback(err, null, resp);
         return;
       }
@@ -193,6 +205,7 @@ class BatchTransaction extends Snapshot {
         }
       }
 
+      span.end();
       callback(null, partitions, resp);
     });
   }
@@ -226,6 +239,7 @@ class BatchTransaction extends Snapshot {
    * @returns {Promise<CreateReadPartitionsResponse>}
    */
   createReadPartitions(options, callback) {
+    const span = startTrace('BatchTransaction.createReadPartitions');
     const reqOpts = Object.assign({}, options, {
       keySet: Snapshot.encodeKeySet(options),
     });
@@ -247,7 +261,14 @@ class BatchTransaction extends Snapshot {
         gaxOpts: options.gaxOptions,
         headers: headers,
       },
-      callback
+      (err, partitions, resp) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
+        span.end();
+        callback(err, partitions, resp);
+      }
     );
   }
   /**
@@ -322,6 +343,7 @@ class BatchTransaction extends Snapshot {
    * ```
    */
   executeStream(partition) {
+    // TODO: Instrument the streams with Otel.
     if (is.string(partition.table)) {
       return this.createReadStream(partition.table, partition);
     }

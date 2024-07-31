@@ -80,6 +80,14 @@ import {
 import grpcGcpModule = require('grpc-gcp');
 const grpcGcp = grpcGcpModule(grpc);
 import * as v1 from './v1';
+import {
+  ObservabilityOptions,
+  applyObservabilityOptions,
+  getActiveOrNoopSpan,
+  startTrace,
+  setSpanError,
+  setTracerProvider,
+} from './instrument';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const gcpApiConfig = require('./spanner_grpc_config.json');
@@ -138,7 +146,9 @@ export interface SpannerOptions extends GrpcClientOptions {
   sslCreds?: grpc.ChannelCredentials;
   routeToLeaderEnabled?: boolean;
   directedReadOptions?: google.spanner.v1.IDirectedReadOptions | null;
+  observabilityConfig?: ObservabilityOptions | undefined;
 }
+
 export interface RequestConfig {
   client: string;
   method: string;
@@ -300,6 +310,7 @@ class Spanner extends GrpcService {
         }
       }
     }
+
     options = Object.assign(
       {
         libName: 'gccl',
@@ -329,6 +340,7 @@ class Spanner extends GrpcService {
       options.port = emulatorHost.port;
       options.sslCreds = grpc.credentials.createInsecure();
     }
+
     const config = {
       baseUrl:
         options.apiEndpoint ||
@@ -362,6 +374,7 @@ class Spanner extends GrpcService {
       [CLOUD_RESOURCE_HEADER]: this.projectFormattedName_,
     };
     this.directedReadOptions = directedReadOptions;
+    applyObservabilityOptions(options.observabilityConfig);
   }
 
   /**
@@ -414,6 +427,7 @@ class Spanner extends GrpcService {
 
   /** Closes this Spanner client and cleans up all resources used by it. */
   close(): void {
+    const span = startTrace('Spanner.close');
     this.clients_.forEach(c => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const client = c as any;
@@ -422,6 +436,7 @@ class Spanner extends GrpcService {
       }
       client.close();
     });
+    span.end();
   }
 
   /**
@@ -527,13 +542,20 @@ class Spanner extends GrpcService {
     config: CreateInstanceRequest,
     callback?: CreateInstanceCallback
   ): void | Promise<CreateInstanceResponse> {
+    const span = startTrace('SpannerClient.createInstance');
     if (!name) {
-      throw new GoogleError('A name is required to create an instance.');
+      const msg = 'A name is required to create an instance';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError(msg);
     }
     if (!config) {
-      throw new GoogleError(
-        ['A configuration object is required to create an instance.'].join('')
-      );
+      const msg = 'A configuration object is required to create an instance';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError([msg].join(''));
     }
     const formattedName = Instance.formatName_(this.projectId, name);
     const displayName = config.displayName || formattedName.split('/').pop();
@@ -552,9 +574,11 @@ class Spanner extends GrpcService {
     };
 
     if (reqOpts.instance.nodeCount && reqOpts.instance.processingUnits) {
-      throw new GoogleError(
-        ['Only one of nodeCount or processingUnits can be specified.'].join('')
-      );
+      const msg = 'Only one of nodeCount or processingUnits can be specified.';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError(msg);
     }
     if (!reqOpts.instance.nodeCount && !reqOpts.instance.processingUnits) {
       // If neither nodes nor processingUnits are specified, default to a
@@ -578,10 +602,13 @@ class Spanner extends GrpcService {
       },
       (err, operation, resp) => {
         if (err) {
+          setSpanError(span, err);
+          span.end();
           callback!(err, null, null, resp);
           return;
         }
         const instance = this.instance(formattedName);
+        span.end();
         callback!(null, instance, operation, resp);
       }
     );
@@ -681,6 +708,8 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstancesOptions | GetInstancesCallback,
     cb?: GetInstancesCallback
   ): Promise<GetInstancesResponse> | void {
+    const span = startTrace('SpannerClient.getInstances');
+
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     const options =
@@ -730,9 +759,13 @@ class Spanner extends GrpcService {
             return instanceInstance;
           });
         }
+        if (err) {
+          setSpanError(span, err);
+        }
         const nextQuery = nextPageRequest!
           ? extend({}, options, nextPageRequest!)
           : null;
+        span.end();
         callback!(err, instanceInstances, nextQuery, ...args);
       }
     );
@@ -919,22 +952,29 @@ class Spanner extends GrpcService {
     config: CreateInstanceConfigRequest,
     callback?: CreateInstanceConfigCallback
   ): void | Promise<CreateInstanceConfigResponse> {
+    const span = startTrace('SpannerClient.createInstanceConfig');
     if (!name) {
-      throw new GoogleError('A name is required to create an instance config.');
+      const msg = 'A name is required to create an instance config.';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError(msg);
     }
     if (!config) {
-      throw new GoogleError(
-        [
-          'A configuration object is required to create an instance config.',
-        ].join('')
-      );
+      const msg =
+        'A configuration object is required to create an instance config.';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError(msg);
     }
     if (!config.baseConfig) {
-      throw new GoogleError(
-        ['Base instance config is required to create an instance config.'].join(
-          ''
-        )
-      );
+      const msg =
+        'Base instance config is required to create an instance config.';
+      setSpanError(span, msg);
+      span.recordException(msg);
+      span.end();
+      throw new GoogleError([msg].join(''));
     }
     const formattedName = InstanceConfig.formatName_(this.projectId, name);
     const displayName = config.displayName || formattedName.split('/').pop();
@@ -973,10 +1013,13 @@ class Spanner extends GrpcService {
       },
       (err, operation, resp) => {
         if (err) {
+          setSpanError(span, err);
+          span.end();
           callback!(err, null, null, resp);
           return;
         }
         const instanceConfig = this.instanceConfig(formattedName);
+        span.end();
         callback!(null, instanceConfig, operation, resp);
       }
     );
@@ -1078,6 +1121,7 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigsOptions | GetInstanceConfigsCallback,
     cb?: GetInstanceConfigsCallback
   ): Promise<GetInstanceConfigsResponse> | void {
+    const span = startTrace('SpannerClient.getInstanceConfigs');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
     const options =
@@ -1094,6 +1138,7 @@ class Spanner extends GrpcService {
     // Copy over pageSize and pageToken values from gaxOptions.
     // However values set on options take precedence.
     if (gaxOpts) {
+      // TODO: Annotate the span with the pageSize and pageToken values.
       reqOpts = extend(
         {},
         {
@@ -1115,9 +1160,14 @@ class Spanner extends GrpcService {
         headers: this.resourceHeader_,
       },
       (err, instanceConfigs, nextPageRequest, ...args) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
         const nextQuery = nextPageRequest!
           ? extend({}, options, nextPageRequest!)
           : null;
+        span.end();
         callback!(err, instanceConfigs, nextQuery, ...args);
       }
     );
@@ -1262,6 +1312,7 @@ class Spanner extends GrpcService {
     optionsOrCallback?: GetInstanceConfigOptions | GetInstanceConfigCallback,
     cb?: GetInstanceConfigCallback
   ): Promise<GetInstanceConfigResponse> | void {
+    const span = startTrace('SpannerClient.getInstanceConfig');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb;
     const options =
@@ -1286,6 +1337,10 @@ class Spanner extends GrpcService {
         headers: this.resourceHeader_,
       },
       (err, instanceConfig) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
         callback!(err, instanceConfig);
       }
     );
@@ -1370,6 +1425,7 @@ class Spanner extends GrpcService {
       | GetInstanceConfigOperationsCallback,
     cb?: GetInstanceConfigOperationsCallback
   ): void | Promise<GetInstanceConfigOperationsResponse> {
+    const span = startTrace('SpannerClient.getInstanceConfigOperations');
     const callback =
       typeof optionsOrCallback === 'function' ? optionsOrCallback : cb!;
     const options =
@@ -1406,10 +1462,15 @@ class Spanner extends GrpcService {
         headers: this.resourceHeader_,
       },
       (err, operations, nextPageRequest, ...args) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
         const nextQuery = nextPageRequest!
           ? extend({}, options, nextPageRequest!)
           : null;
 
+        span.end();
         callback!(err, operations, nextQuery, ...args);
       }
     );
@@ -1479,11 +1540,17 @@ class Spanner extends GrpcService {
    * @param {function} callback Callback function
    */
   prepareGapicRequest_(config, callback) {
+    const span = getActiveOrNoopSpan();
+    span.addEvent('prepareGapicRequest');
+
     this.auth.getProjectId((err, projectId) => {
       if (err) {
+        span.addEvent('failed to correctly retrieve the projectId');
+        setSpanError(span, err);
         callback(err);
         return;
       }
+
       const clientName = config.client;
       if (!this.clients_.has(clientName)) {
         this.clients_.set(clientName, new v1[clientName](this.options));
@@ -1529,6 +1596,7 @@ class Spanner extends GrpcService {
           },
         })
       );
+
       callback(null, requestFn);
     });
   }

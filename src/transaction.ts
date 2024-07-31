@@ -22,7 +22,7 @@ import {EventEmitter} from 'events';
 import {grpc, CallOptions, ServiceError, Status, GoogleError} from 'google-gax';
 import * as is from 'is';
 import {common as p} from 'protobufjs';
-import {Readable, PassThrough} from 'stream';
+import {finished, Readable, PassThrough, Stream} from 'stream';
 
 import {codec, Json, JSONOptions, Type, Value} from './codec';
 import {
@@ -45,6 +45,7 @@ import IQueryOptions = google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Database, Spanner} from '.';
 import ReadLockMode = google.spanner.v1.TransactionOptions.ReadWrite.ReadLockMode;
+import {startTrace, setSpanError} from './instrument';
 
 export type Rows = Array<Row | Json>;
 const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.retryinfo';
@@ -401,6 +402,7 @@ export class Snapshot extends EventEmitter {
     gaxOptionsOrCallback?: CallOptions | BeginTransactionCallback,
     cb?: BeginTransactionCallback
   ): void | Promise<BeginResponse> {
+    const span = startTrace('Transaction.begin');
     const gaxOpts =
       typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
     const callback =
@@ -443,10 +445,13 @@ export class Snapshot extends EventEmitter {
         resp: spannerClient.spanner.v1.ITransaction
       ) => {
         if (err) {
+          setSpanError(span, err);
+          span.end();
           callback!(err, resp);
           return;
         }
         this._update(resp);
+        span.end();
         callback!(null, resp);
       }
     );
@@ -898,6 +903,8 @@ export class Snapshot extends EventEmitter {
     requestOrCallback: ReadRequest | ReadCallback,
     cb?: ReadCallback
   ): void | Promise<ReadResponse> {
+    const span = startTrace('Transaction.read', {tableName: table});
+
     const rows: Rows = [];
 
     let request: ReadRequest;
@@ -912,9 +919,15 @@ export class Snapshot extends EventEmitter {
     }
 
     this.createReadStream(table, request)
-      .on('error', callback!)
+      .on('error', err => {
+        setSpanError(span, err);
+        callback!(err as grpc.ServiceError, null);
+      })
       .on('data', row => rows.push(row))
-      .on('end', () => callback!(null, rows));
+      .on('end', () => {
+        span.end();
+        callback!(null, rows);
+      });
   }
 
   /**
@@ -1000,12 +1013,17 @@ export class Snapshot extends EventEmitter {
     query: string | ExecuteSqlRequest,
     callback?: RunCallback
   ): void | Promise<RunResponse> {
+    const span = startTrace('Transaction.run', {sql: query});
     const rows: Rows = [];
     let stats: google.spanner.v1.ResultSetStats;
     let metadata: google.spanner.v1.ResultSetMetadata;
 
     this.runStream(query)
-      .on('error', callback!)
+      .on('error', (err, rows, stats, metadata) => {
+        setSpanError(span, err);
+        span.end();
+        callback!(err, rows, stats, metadata);
+      })
       .on('response', response => {
         if (response.metadata) {
           metadata = response.metadata;
@@ -1016,7 +1034,10 @@ export class Snapshot extends EventEmitter {
       })
       .on('data', row => rows.push(row))
       .on('stats', _stats => (stats = _stats))
-      .on('end', () => callback!(null, rows, stats, metadata));
+      .on('end', () => {
+        span.end();
+        callback!(null, rows, stats, metadata);
+      });
   }
 
   /**
@@ -1119,6 +1140,7 @@ export class Snapshot extends EventEmitter {
    * ```
    */
   runStream(query: string | ExecuteSqlRequest): PartialResultStream {
+    const span = startTrace('Transaction.runStream', {sql: query});
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
@@ -1193,6 +1215,8 @@ export class Snapshot extends EventEmitter {
           sanitizeRequest();
         } catch (e) {
           const errorStream = new PassThrough();
+          setSpanError(span, e as Error);
+          span.recordException(e as Error);
           setImmediate(() => errorStream.destroy(e as Error));
           return errorStream;
         }
@@ -1207,14 +1231,14 @@ export class Snapshot extends EventEmitter {
       });
     };
 
-    return partialResultStream(this._wrapWithIdWaiter(makeRequest), {
+    const prs = partialResultStream(this._wrapWithIdWaiter(makeRequest), {
       json,
       jsonOptions,
       maxResumeRetries,
       columnsMetadata,
       gaxOptions,
     })
-      .on('response', response => {
+      ?.on('response', response => {
         if (response.metadata && response.metadata!.transaction && !this.id) {
           this._update(response.metadata!.transaction);
         }
@@ -1224,6 +1248,17 @@ export class Snapshot extends EventEmitter {
           this.begin();
         }
       });
+
+    if (prs instanceof Stream) {
+      finished(prs, err => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
+      });
+    }
+
+    return prs;
   }
 
   /**
@@ -1513,6 +1548,7 @@ export class Dml extends Snapshot {
     query: string | ExecuteSqlRequest,
     callback?: RunUpdateCallback
   ): void | Promise<RunUpdateResponse> {
+    const span = startTrace('Transaction.runUpdate', {sql: query});
     if (typeof query === 'string') {
       query = {sql: query} as ExecuteSqlRequest;
     }
@@ -1530,6 +1566,11 @@ export class Dml extends Snapshot {
           rowCount = Math.floor(stats[stats.rowCount] as number);
         }
 
+        if (err) {
+          setSpanError(span, err);
+        }
+
+        span.end();
         callback!(err, rowCount);
       }
     );
@@ -1733,6 +1774,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: BatchUpdateOptions | CallOptions | BatchUpdateCallback,
     cb?: BatchUpdateCallback
   ): Promise<BatchUpdateResponse> | void {
+    const span = startTrace('Transaction.batchUpdate');
     const options =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1749,6 +1791,8 @@ export class Transaction extends Dml {
         code: 3, // invalid argument
         rowCounts,
       }) as BatchUpdateError;
+      setSpanError(span, batchError);
+      span.end();
       callback!(batchError, rowCounts);
       return;
     }
@@ -1803,6 +1847,8 @@ export class Transaction extends Dml {
         if (err) {
           const rowCounts: number[] = [];
           batchUpdateError = Object.assign(err, {rowCounts});
+          setSpanError(span, batchUpdateError);
+          span.end();
           callback!(batchUpdateError, rowCounts, resp);
           return;
         }
@@ -1832,8 +1878,10 @@ export class Transaction extends Dml {
             metadata: Transaction.extractKnownMetadata(status.details!),
             rowCounts,
           }) as BatchUpdateError;
+          setSpanError(span, batchUpdateError);
         }
 
+        span.end();
         callback!(batchUpdateError!, rowCounts, resp);
       }
     );
@@ -1937,6 +1985,7 @@ export class Transaction extends Dml {
     optionsOrCallback?: CommitOptions | CallOptions | CommitCallback,
     cb?: CommitCallback
   ): void | Promise<CommitResponse> {
+    const span = startTrace('Transaction.commit');
     const options =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -1954,7 +2003,10 @@ export class Transaction extends Dml {
     } else if (!this._useInRunner) {
       reqOpts.singleUseTransaction = this._options;
     } else {
-      this.begin().then(() => this.commit(options, callback), callback);
+      this.begin().then(() => {
+        span.end();
+        this.commit(options, callback);
+      }, callback);
       return;
     }
 
@@ -1991,6 +2043,10 @@ export class Transaction extends Dml {
       (err: null | Error, resp: spannerClient.spanner.v1.ICommitResponse) => {
         this.end();
 
+        if (err) {
+          setSpanError(span, err);
+        }
+
         if (resp && resp.commitTimestamp) {
           this.commitTimestampProto = resp.commitTimestamp;
           this.commitTimestamp = new PreciseDate(
@@ -1999,6 +2055,7 @@ export class Transaction extends Dml {
         }
         err = Transaction.decorateCommitError(err as ServiceError, mutations);
 
+        span.end();
         callback!(err as ServiceError | null, resp);
       }
     );
@@ -2287,17 +2344,19 @@ export class Transaction extends Dml {
       | spannerClient.spanner.v1.Spanner.RollbackCallback,
     cb?: spannerClient.spanner.v1.Spanner.RollbackCallback
   ): void | Promise<void> {
+    const span = startTrace('Transaction.rollback');
     const gaxOpts =
       typeof gaxOptionsOrCallback === 'object' ? gaxOptionsOrCallback : {};
     const callback =
       typeof gaxOptionsOrCallback === 'function' ? gaxOptionsOrCallback : cb!;
 
     if (!this.id) {
-      callback!(
-        new Error(
-          'Transaction ID is unknown, nothing to rollback.'
-        ) as ServiceError
-      );
+      const err = new Error(
+        'Transaction ID is unknown, nothing to rollback.'
+      ) as ServiceError;
+      setSpanError(span, err);
+      span.end();
+      callback!(err);
       return;
     }
 
@@ -2323,6 +2382,10 @@ export class Transaction extends Dml {
       },
       (err: null | ServiceError) => {
         this.end();
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
         callback!(err);
       }
     );

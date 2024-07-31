@@ -44,6 +44,7 @@ import {
 import {grpc, CallOptions} from 'google-gax';
 import IRequestOptions = google.spanner.v1.IRequestOptions;
 import {Spanner} from '.';
+import {startTrace, setSpanError} from './instrument';
 
 export type GetSessionResponse = [Session, r.Response];
 
@@ -236,6 +237,7 @@ export class Session extends common.GrpcServiceObject {
         optionsOrCallback: CreateSessionOptions | CreateSessionCallback,
         callback: CreateSessionCallback
       ) => {
+        const span = startTrace('Session.create');
         const options =
           typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
         callback =
@@ -249,11 +251,14 @@ export class Session extends common.GrpcServiceObject {
 
         return database.createSession(options, (err, session, apiResponse) => {
           if (err) {
+            setSpanError(span, err);
+            span.end();
             callback(err, null, apiResponse);
             return;
           }
 
           extend(this, session);
+          span.end();
           callback(null, this, apiResponse);
         });
       },
@@ -375,6 +380,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | GetSessionMetadataCallback,
     cb?: GetSessionMetadataCallback
   ): void | Promise<GetSessionMetadataResponse> {
+    const span = startTrace('Session.getMetadata');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -397,11 +403,16 @@ export class Session extends common.GrpcServiceObject {
         headers: headers,
       },
       (err, resp) => {
+        if (err) {
+          setSpanError(span, err);
+        }
+
         if (resp) {
           resp.databaseRole = resp.creatorRole;
           delete resp.creatorRole;
           this.metadata = resp;
         }
+        span.end();
         callback!(err, resp);
       }
     );
@@ -431,6 +442,7 @@ export class Session extends common.GrpcServiceObject {
     optionsOrCallback?: CallOptions | KeepAliveCallback,
     cb?: KeepAliveCallback
   ): void | Promise<KeepAliveResponse> {
+    const span = startTrace('Session.keepAlive');
     const gaxOpts =
       typeof optionsOrCallback === 'object' ? optionsOrCallback : {};
     const callback =
@@ -448,7 +460,13 @@ export class Session extends common.GrpcServiceObject {
         gaxOpts,
         headers: this.resourceHeader_,
       },
-      callback!
+      err => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
+        callback!(err);
+      }
     );
   }
   /**

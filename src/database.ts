@@ -102,6 +102,7 @@ import Policy = google.iam.v1.Policy;
 import FieldMask = google.protobuf.FieldMask;
 import IDatabase = google.spanner.admin.database.v1.IDatabase;
 import snakeCase = require('lodash.snakecase');
+import {startTrace, setSpanError} from './instrument';
 
 export type GetDatabaseRolesCallback = RequestCallback<
   IDatabaseRole,
@@ -399,6 +400,7 @@ class Database extends common.GrpcServiceObject {
         options: CreateDatabaseOptions,
         callback: CreateDatabaseCallback
       ) => {
+        // TODO: Instrument this method with OpenTelemetry.
         const pool = this.pool_ as SessionPool;
         if (pool._pending > 0) {
           // If there are BatchCreateSessions requests pending, then we should
@@ -648,11 +650,14 @@ class Database extends common.GrpcServiceObject {
     options: number | BatchCreateSessionsOptions,
     callback?: BatchCreateSessionsCallback
   ): void | Promise<BatchCreateSessionsResponse> {
+    const span = startTrace('Database.batchCreateSessions');
+
     if (typeof options === 'number') {
       options = {count: options};
     }
 
     const count = options.count;
+    span.setAttribute('session.count.requested', count);
     const labels = options.labels || {};
     const databaseRole = options.databaseRole || this.databaseRole || null;
 
@@ -677,6 +682,8 @@ class Database extends common.GrpcServiceObject {
       },
       (err, resp) => {
         if (err) {
+          setSpanError(span, err);
+          span.end();
           callback!(err, null, resp!);
           return;
         }
@@ -687,6 +694,9 @@ class Database extends common.GrpcServiceObject {
           return session;
         });
 
+        span.setAttribute('session.count.created', sessions.length);
+
+        span.end();
         callback!(null, sessions, resp!);
       }
     );
@@ -2013,6 +2023,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | GetSnapshotCallback,
     cb?: GetSnapshotCallback
   ): void | Promise<[Snapshot]> {
+    const span = startTrace('Database.getSnapshot');
     const callback =
       typeof optionsOrCallback === 'function'
         ? (optionsOrCallback as GetSnapshotCallback)
@@ -2024,6 +2035,8 @@ class Database extends common.GrpcServiceObject {
 
     this.pool_.getSession((err, session) => {
       if (err) {
+        setSpanError(span, err);
+        span.end();
         callback!(err as ServiceError);
         return;
       }
@@ -2032,18 +2045,22 @@ class Database extends common.GrpcServiceObject {
 
       snapshot.begin(err => {
         if (err) {
+          setSpanError(span, err);
           if (isSessionNotFoundError(err)) {
             session!.lastError = err;
             this.pool_.release(session!);
             this.getSnapshot(options, callback!);
+            span.end();
           } else {
             this.pool_.release(session!);
+            span.end();
             callback!(err);
           }
           return;
         }
 
         this._releaseOnEnd(session!, snapshot);
+        span.end();
         callback!(err, snapshot);
       });
     });
@@ -2698,6 +2715,8 @@ class Database extends common.GrpcServiceObject {
     optionsOrCallback?: TimestampBounds | RunCallback,
     cb?: RunCallback
   ): void | Promise<RunResponse> {
+    const span = startTrace('Database.run', {sql: query});
+
     let stats: ResultSetStats;
     let metadata: ResultSetMetadata;
     const rows: Row[] = [];
@@ -2711,7 +2730,10 @@ class Database extends common.GrpcServiceObject {
         : {};
 
     this.runStream(query, options)
-      .on('error', callback!)
+      .on('error', err => {
+        setSpanError(span, err);
+        callback!(err as grpc.ServiceError, rows, stats, metadata);
+      })
       .on('response', response => {
         if (response.metadata) {
           metadata = response.metadata;
@@ -2722,6 +2744,7 @@ class Database extends common.GrpcServiceObject {
         rows.push(row);
       })
       .on('end', () => {
+        span.end();
         callback!(null, rows, stats, metadata);
       });
   }
@@ -2923,11 +2946,15 @@ class Database extends common.GrpcServiceObject {
     query: string | ExecuteSqlRequest,
     options?: TimestampBounds
   ): PartialResultStream {
+    const span = startTrace('Database.runStream');
+
     const proxyStream: Transform = through.obj();
 
     this.pool_.getSession((err, session) => {
       if (err) {
+        setSpanError(span, err);
         proxyStream.destroy(err);
+        span.end();
         return;
       }
 
@@ -2941,6 +2968,8 @@ class Database extends common.GrpcServiceObject {
       dataStream
         .once('data', () => (dataReceived = true))
         .once('error', err => {
+          setSpanError(span, err);
+
           if (
             !dataReceived &&
             isSessionNotFoundError(err as grpc.ServiceError)
@@ -2963,10 +2992,15 @@ class Database extends common.GrpcServiceObject {
             proxyStream.destroy(err);
             snapshot.end();
           }
+
+          span.end();
         })
         .on('stats', stats => proxyStream.emit('stats', stats))
         .on('response', response => proxyStream.emit('response', response))
-        .once('end', endListener)
+        .once('end', () => {
+          span.end();
+          endListener();
+        })
         .pipe(proxyStream);
     });
 
@@ -3071,6 +3105,7 @@ class Database extends common.GrpcServiceObject {
     optionsOrRunFn: RunTransactionOptions | RunTransactionCallback,
     fn?: RunTransactionCallback
   ): void {
+    const span = startTrace('Database.runTransaction');
     const runFn =
       typeof optionsOrRunFn === 'function'
         ? (optionsOrRunFn as RunTransactionCallback)
@@ -3081,11 +3116,18 @@ class Database extends common.GrpcServiceObject {
         : {};
 
     this.pool_.getSession((err, session?, transaction?) => {
+      if (err) {
+        setSpanError(span, err);
+      }
+
       if (err && isSessionNotFoundError(err as grpc.ServiceError)) {
+        span.end();
         this.runTransaction(options, runFn!);
         return;
       }
+
       if (err) {
+        span.end();
         runFn!(err as grpc.ServiceError);
         return;
       }
@@ -3096,7 +3138,11 @@ class Database extends common.GrpcServiceObject {
         transaction!.excludeTxnFromChangeStreams();
       }
 
-      const release = this.pool_.release.bind(this.pool_, session!);
+      const release = () => {
+        span.end();
+        this.pool_.release(session!);
+      };
+
       const runner = new TransactionRunner(
         session!,
         transaction!,
@@ -3105,6 +3151,11 @@ class Database extends common.GrpcServiceObject {
       );
 
       runner.run().then(release, err => {
+        if (err) {
+          setSpanError(span, err);
+        }
+        span.end();
+
         if (isSessionNotFoundError(err)) {
           release();
           this.runTransaction(options, runFn!);
@@ -3294,11 +3345,14 @@ class Database extends common.GrpcServiceObject {
     mutationGroups: MutationGroup[],
     options?: BatchWriteOptions
   ): NodeJS.ReadableStream {
+    const span = startTrace('Database.batchWriteAtLeastOnce');
     const proxyStream: Transform = through.obj();
 
     this.pool_.getSession((err, session) => {
       if (err) {
+        setSpanError(span, err);
         proxyStream.destroy(err);
+        span.end();
         return;
       }
       const gaxOpts = extend(true, {}, options?.gaxOptions);
@@ -3341,8 +3395,14 @@ class Database extends common.GrpcServiceObject {
           } else {
             proxyStream.destroy(err);
           }
+
+          setSpanError(span, err);
+          span.end();
         })
-        .once('end', () => this.pool_.release(session!))
+        .once('end', () => {
+          this.pool_.release(session!);
+          span.end();
+        })
         .pipe(proxyStream);
     });
 
