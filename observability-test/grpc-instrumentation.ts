@@ -26,7 +26,7 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
     AsyncHooksContextManager,
   } = require('@opentelemetry/context-async-hooks');
   const {GrpcInstrumentation} = require('@opentelemetry/instrumentation-grpc');
-  const done = registerInstrumentations({
+  const fini = registerInstrumentations({
     instrumentations: [new GrpcInstrumentation()],
   });
   const {
@@ -70,7 +70,7 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
     database.close();
     spanner.close();
     await provider.shutdown();
-    done();
+    fini();
   });
 
   it('Invoking database methods creates spans: gRPC enabled', () => {

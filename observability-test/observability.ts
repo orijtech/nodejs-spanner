@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 const assert = require('assert');
 
@@ -26,8 +25,6 @@ const {
   disableContextAndManager,
   setGlobalContextManager,
   startTrace,
-  optInForSQLStatementOnSpans,
-  optOutOfSQLStatementOnSpans,
   setTracerProvider,
 } = require('../src/instrument');
 const {
@@ -46,17 +43,14 @@ describe('Testing spans produced with a sampler on', () => {
   const exporter = new InMemorySpanExporter();
   const sampler = new AlwaysOnSampler();
 
+  const {Database, Spanner} = require('../src');
+
   let provider: typeof NodeTracerProvider;
   let contextManager: typeof ContextManager;
+  let spanner: typeof Spanner;
+  let database: typeof Database;
 
-  const {Spanner} = require('../src');
-  const spanner = new Spanner({
-    projectId: projectId,
-  });
-  const instance = spanner.instance('test-instance');
-  const database = instance.database('test-db');
-
-  beforeEach(() => {
+  beforeEach(async () => {
     provider = new NodeTracerProvider({
       sampler: sampler,
       exporter: exporter,
@@ -67,17 +61,29 @@ describe('Testing spans produced with a sampler on', () => {
 
     contextManager = new AsyncHooksContextManager();
     setGlobalContextManager(contextManager);
+
+    spanner = new Spanner({
+      projectId: projectId,
+      observabilityConfig: {
+        tracerProvider: provider,
+      },
+    });
+
+    const instance = spanner.instance('test-instance');
+    database = instance.database('test-db');
+
+    // Warm up session creation.
+    await database.run('SELECT 2');
+    await new Promise((resolve, reject) => setTimeout(resolve, 100));
   });
 
   afterEach(async () => {
-    disableContextAndManager(contextManager);
+    database.close();
+    spanner.close();
     exporter.forceFlush();
     exporter.reset();
-  });
-
-  after(async () => {
-    spanner.close();
     await provider.shutdown();
+    disableContextAndManager(contextManager);
   });
 
   it('Invoking database methods creates spans: no gRPC instrumentation', async () => {
@@ -123,25 +129,79 @@ describe('Testing spans produced with a sampler on', () => {
         'spanner',
         'Missing DB_SYSTEM attribute'
       );
+      assert.equal(
+        span.attributes[SEMATTRS_DB_STATEMENT],
+        undefined,
+        'unexpected DB_STATEMENT attribute without it being toggled'
+      );
     });
+  });
+
+  it('Closing the client creates the closing span', () => {
+    spanner.close();
+
+    const spans = exporter.getFinishedSpans();
+    // We need to ensure that spans were generated and exported
+    // correctly.
+    assert.ok(spans.length == 1, 'exactly 1 span must have been created');
+    assert.strictEqual(
+      spans[0].name,
+      'cloud.google.com/nodejs/spanner/Spanner.close'
+    );
+  });
+});
+
+describe('Extended tracing', () => {
+  const exporter = new InMemorySpanExporter();
+  const sampler = new AlwaysOnSampler();
+
+  const {Database, Spanner} = require('../src');
+
+  let provider: typeof NodeTracerProvider;
+  let contextManager: typeof ContextManager;
+  let spanner: typeof Spanner;
+  let database: typeof Database;
+
+  beforeEach(async () => {
+    provider = new NodeTracerProvider({
+      sampler: sampler,
+      exporter: exporter,
+    });
+    provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+    provider.register();
+    setTracerProvider(provider);
+
+    contextManager = new AsyncHooksContextManager();
+    setGlobalContextManager(contextManager);
+  });
+
+  afterEach(async () => {
+    database.close();
+    spanner.close();
+    exporter.forceFlush();
+    exporter.reset();
+    await provider.shutdown();
+    disableContextAndManager(contextManager);
   });
 
   const methodsTakingSQL = {
     'cloud.google.com/nodejs/spanner/Database.run': true,
+    'cloud.google.com/nodejs/spanner/Database.runStream': true,
     'cloud.google.com/nodejs/spanner/Transaction.runStream': true,
   };
 
   it('Opt-ing into PII-risk SQL annotation on spans works', async () => {
-    optInForSQLStatementOnSpans();
-
-    const {Spanner} = require('../src');
-    const spanner = new Spanner({
+    spanner = new Spanner({
       projectId: projectId,
+      observabilityConfig: {
+        tracerProvider: provider,
+        enableExtendedTracing: true,
+      },
     });
-    const instance = spanner.instance('test-instance');
-    const database = instance.database('test-db');
 
-    const query = {sql: 'SELECT CURRENT_TIMESTAMP()'};
+    const instance = spanner.instance('test-instance');
+    database = instance.database('test-db');
+    const query = {sql: 'SELECT CURRENT_TIMESTAMP'};
     const [rows] = await database.run(query);
     assert.strictEqual(rows.length, 1);
 
@@ -162,141 +222,60 @@ describe('Testing spans produced with a sampler on', () => {
       assert.strictEqual(
         got,
         want,
-        `${span.name} has Invalid DB_STATEMENT attribute\n\tGot:  ${got}\n\tWant: ${want}`
+        `${span.name} has Invalid DB_STATEMENT attribute\n\tGot:  ${got}\n\tWant: ${want}\n\n${JSON.stringify(span.attributes)}`
       );
     });
   });
 
-  it('Closing the client creates the closing span', () => {
-    const {Spanner} = require('../src');
-    const spanner = new Spanner({
-      projectId: projectId,
-    });
-    spanner.close();
+  it('By default or with extended tracing disabled', () => {
+    const sopts = {sql: 'SELECT 1', enableExtendedTracing: false};
 
-    const spans = exporter.getFinishedSpans();
-    // We need to ensure that spans were generated and exported
-    // correctly.
-    assert.ok(spans.length == 1, 'exactly 1 span must have been created');
-    assert.strictEqual(
-      spans[0].name,
-      'cloud.google.com/nodejs/spanner/Spanner.close'
-    );
+    startTrace('extendedTracingOff', sopts, span => {
+      const got = span.attributes[SEMATTRS_DB_STATEMENT];
+      const want = undefined;
+      assert.strictEqual(
+        got,
+        want,
+        `${span.name} has an unexpected DB_STATEMENT attribute\n\tGot:  ${got}\n\tWant: ${want}\n\n${JSON.stringify(span.attributes)}`
+      );
+    });
+  });
+
+  it('startTrace with enableExtendedTracing=true', () => {
+    const opts = {sql: 'SELECT 1', enableExtendedTracing: true};
+    startTrace('extendedTracingOn', opts, span => {
+      const got = span.attributes[SEMATTRS_DB_STATEMENT];
+      const want = opts.sql;
+      assert.strictEqual(
+        got,
+        want,
+        `${span.name} has an unexpected DB_STATEMENT attribute\n\tGot:  ${got}\n\tWant: ${want}\n\n${JSON.stringify(span.attributes)}`
+      );
+    });
   });
 });
 
 describe('Capturing sessionPool annotations', () => {
+  const {Database, Spanner} = require('../src');
+
   const exporter = new InMemorySpanExporter();
   const sampler = new AlwaysOnSampler();
 
-  const {Spanner} = require('../src');
-  const spanner = new Spanner({
-    projectId: projectId,
-  });
-  const instance = spanner.instance('test-instance');
-  const database = instance.database('test-db');
-
-  const provider = new NodeTracerProvider({
-    sampler: sampler,
-    exporter: exporter,
-  });
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
-  provider.register();
-  setTracerProvider(provider);
-
-  const contextManager = new AsyncHooksContextManager();
-  setGlobalContextManager(contextManager);
-
-  after(async () => {
-    exporter.forceFlush();
-    exporter.reset();
-    disableContextAndManager(contextManager);
-    await provider.shutdown();
-  });
-
-  it('Check for annotations', async () => {
-    const query = {sql: 'SELECT * FROM INFORMATION_SCHEMA.TABLES'};
-    const [rows] = await database.run(query);
-    assert.ok(rows.length > 1, 'at least 1 table result should be returned');
-
-    exporter.forceFlush();
-
-    const spans = exporter.getFinishedSpans();
-    assert.ok(spans.length >= 1, 'at least 1 span should be exported');
-
-    spans.sort((spanA, spanB) => {
-      return spanA.startTime < spanB.startTime;
-    });
-
-    const wantNames = [
-      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions',
-      'cloud.google.com/nodejs/spanner/Database.runStream',
-      'cloud.google.com/nodejs/spanner/Database.run',
-      'cloud.google.com/nodejs/spanner/Transaction.runStream',
-    ];
-
-    const gotNames: string[] = [];
-    spans.forEach(span => {
-      gotNames.push(span.name);
-    });
-
-    assert.deepEqual(
-      wantNames,
-      gotNames,
-      'The spans order by duration has been violated:\n\tGot:  ' +
-        gotNames.toString() +
-        '\n\tWant: ' +
-        wantNames.toString()
-    );
-
-    const span0 = spans[0];
-    assert.strictEqual(
-      span0.name,
-      'cloud.google.com/nodejs/spanner/Database.batchCreateSessions'
-    );
-    assert.ok(
-      span0.events.length > 0,
-      'at least one event should have been added'
-    );
-    const runStreamSpanEvents = spans[1];
-    // The events are arranged in ascending order by entry time.
-    const wantEvents = [
-      'Attempting to get session',
-      'waiting for a session to become available',
-      'acquired a valid session',
-    ];
-
-    const gotEvents: string[] = [];
-    runStreamSpanEvents.events.forEach(event => {
-      gotEvents.push(event.name);
-    });
-
-    assert.deepEqual(
-      wantEvents,
-      gotEvents,
-      'The events order has been violated:\n\tGot:  ' +
-        gotEvents.toString() +
-        '\n\tWant: ' +
-        wantEvents.toString()
-    );
-  });
-});
-
-describe('Always off sampler used', () => {
-  const exporter = new InMemorySpanExporter();
-  const sampler = new AlwaysOffSampler();
-
   let provider: typeof NodeTracerProvider;
   let contextManager: typeof ContextManager;
+  let spanner: typeof Spanner;
+  let database: typeof Database;
 
-  const {Spanner} = require('../src');
-  const spanner = new Spanner({
-    projectId: projectId,
-  });
-  const instance = spanner.instance('test-instance');
-  const database = instance.database('test-db');
+  beforeEach(async () => {
+    spanner = new Spanner({
+      projectId: projectId,
+    });
+    const instance = spanner.instance('test-instance');
+    database = instance.database('test-db');
+    // Pre-warm the session pool to ensure cached sessions are
+    // available and can easily test out our attributes matches.
+    await database.run('SELECT 1');
 
-  beforeEach(() => {
     provider = new NodeTracerProvider({
       sampler: sampler,
       exporter: exporter,
@@ -310,13 +289,121 @@ describe('Always off sampler used', () => {
   });
 
   afterEach(async () => {
+    database.close();
+    spanner.close();
+    exporter.forceFlush();
+    exporter.reset();
+    await provider.shutdown();
+    disableContextAndManager(contextManager);
+  });
+
+  it('Check for annotations, cached session', async () => {
+    const query = {sql: 'SELECT * FROM INFORMATION_SCHEMA.TABLES'};
+    const [rows] = await database.run(query);
+    assert.ok(rows.length > 1, 'at least 1 table result should be returned');
+
+    exporter.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    assert.ok(spans.length >= 1, 'at least 1 span should be exported');
+
+    spans.sort((spanA, spanB) => {
+      return spanA.startTime < spanB.startTime;
+    });
+
+    const wantSpans = [
+      'cloud.google.com/nodejs/spanner/Database.runStream',
+      'cloud.google.com/nodejs/spanner/Database.run',
+      'cloud.google.com/nodejs/spanner/Transaction.runStream',
+    ];
+
+    const gotSpans: string[] = [];
+    spans.forEach(span => {
+      gotSpans.push(span.name);
+    });
+
+    assert.deepEqual(
+      wantSpans,
+      gotSpans,
+      'The spans order by startTime has been violated:\n\tGot:  ' +
+        gotSpans.toString() +
+        '\n\tWant: ' +
+        wantSpans.toString()
+    );
+
+    const runStreamSpanEvents = spans[0];
+    assert.ok(
+      runStreamSpanEvents.events.length > 0,
+      'at least one event should have been added'
+    );
+
+    // Already sessions were created, given that database was created outside
+    // of this method, hence we shall be re-using sessions.
+    const mandatoryEvents = [
+      'Attempting to get session',
+      'Cache hit: has usable session',
+      'popped session from inventory',
+      'acquired a valid session',
+    ];
+
+    const optionalEvents = [
+      'creating transaction for session',
+      'created transaction for session',
+      'prepareGapicRequest',
+    ];
+
+    const gotEvents: string[] = [];
+    runStreamSpanEvents.events.forEach(event => {
+      gotEvents.push(event.name);
+    });
+
+    assert.deepEqual(
+      mandatoryEvents,
+      gotEvents,
+      'The events order has been violated:\n\tGot:  ' +
+        gotEvents.toString() +
+        '\n\tWant: ' +
+        mandatoryEvents.toString()
+    );
+  });
+});
+
+describe('Always off sampler used', () => {
+  const exporter = new InMemorySpanExporter();
+  const sampler = new AlwaysOffSampler();
+
+  const {Database, Spanner} = require('../src');
+
+  let provider: typeof NodeTracerProvider;
+  let contextManager: typeof ContextManager;
+  let spanner: typeof Spanner;
+  let database: typeof Database;
+
+  beforeEach(() => {
+    provider = new NodeTracerProvider({
+      sampler: sampler,
+      exporter: exporter,
+    });
+    provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+    provider.register();
+    setTracerProvider(provider);
+
+    contextManager = new AsyncHooksContextManager();
+    setGlobalContextManager(contextManager);
+
+    spanner = new Spanner({
+      projectId: projectId,
+    });
+    const instance = spanner.instance('test-instance');
+    database = instance.database('test-db');
+  });
+
+  afterEach(async () => {
+    database.close();
+    spanner.close();
     disableContextAndManager(contextManager);
     exporter.forceFlush();
     exporter.reset();
-  });
-
-  after(async () => {
-    spanner.close();
     await provider.shutdown();
   });
 
@@ -330,8 +417,6 @@ describe('Always off sampler used', () => {
   });
 
   it('Opt-ing into PII-risk SQL annotation', async () => {
-    optInForSQLStatementOnSpans();
-
     const query = {sql: 'SELECT CURRENT_TIMESTAMP()'};
     const [rows] = await database.run(query);
     assert.strictEqual(rows.length, 1);

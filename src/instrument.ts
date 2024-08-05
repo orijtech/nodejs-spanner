@@ -151,7 +151,15 @@ export function startTrace<F extends (span: Span) => ReturnType<F>>(
         span.setAttribute(SEMATTRS_DB_SQL_TABLE, opts.tableName);
       }
 
-      if (opts.sql && (opts.enableExtendedTracing || optedInPII)) {
+      const definedExtendedTracing = opts.enableExtendedTracing !== undefined;
+      // If they optedInPII but opts.enableExtendedTracing=false, reject it.
+      const explicitlySkipET =
+        definedExtendedTracing && !opts.enableExtendedTracing;
+      if (
+        opts.sql &&
+        !explicitlySkipET &&
+        (opts.enableExtendedTracing || optedInPII)
+      ) {
         const sql = opts.sql;
         if (typeof sql === 'string') {
           span.setAttribute(SEMATTRS_DB_STATEMENT, sql as string);
@@ -163,7 +171,7 @@ export function startTrace<F extends (span: Span) => ReturnType<F>>(
 
       if (opts.that) {
         const fn = cb.bind(opts.that);
-        return cb(span);
+        return fn(span);
       } else {
         return cb(span);
       }
