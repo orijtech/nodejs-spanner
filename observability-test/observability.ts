@@ -64,9 +64,6 @@ describe('Testing spans produced with a sampler on', () => {
 
     spanner = new Spanner({
       projectId: projectId,
-      observabilityConfig: {
-        tracerProvider: provider,
-      },
     });
 
     const instance = spanner.instance('test-instance');
@@ -74,11 +71,10 @@ describe('Testing spans produced with a sampler on', () => {
 
     // Warm up session creation.
     await database.run('SELECT 2');
-    await new Promise((resolve, reject) => setTimeout(resolve, 100));
+    // await new Promise((resolve, reject) => setTimeout(resolve, 100));
   });
 
   afterEach(async () => {
-    database.close();
     spanner.close();
     exporter.forceFlush();
     exporter.reset();
@@ -86,68 +82,59 @@ describe('Testing spans produced with a sampler on', () => {
     disableContextAndManager(contextManager);
   });
 
-  it('Invoking database methods creates spans: no gRPC instrumentation', async () => {
+  it('Invoking database methods creates spans: no gRPC instrumentation', () => {
     const query = {sql: 'SELECT 1'};
-    const [rows] = await database.run(query);
-    assert.strictEqual(rows.length, 1);
+    database.run(query, async (err, rows, stats, metadata) => {
+      assert.strictEqual(rows.length, 1);
 
-    const spans = exporter.getFinishedSpans();
-    // We need to ensure that spans were generated and exported
-    // correctly.
-    assert.ok(spans.length > 0, 'at least 1 span must have been created');
+      // Give sometime for spans to be exported.
+      await new Promise((resolve, reject) => setTimeout(resolve, 500));
 
-    // Now sort the spans by duration, in reverse magnitude order.
-    spans.sort((spanA, spanB) => {
-      return spanA.duration > spanB.duration;
-    });
+      const spans = exporter.getFinishedSpans();
+      // We need to ensure that spans were generated and exported
+      // correctly.
+      assert.ok(spans.length > 0, 'at least 1 span must have been created');
 
-    const got: string[] = [];
-    spans.forEach(span => {
-      got.push(span.name);
-    });
+      // Now sort the spans by duration, in reverse magnitude order.
+      spans.sort((spanA, spanB) => {
+        return spanA.duration > spanB.duration;
+      });
 
-    const want = [
-      'cloud.google.com/nodejs/spanner/Database.runStream',
-      'cloud.google.com/nodejs/spanner/Database.run',
-      'cloud.google.com/nodejs/spanner/Transaction.runStream',
-    ];
+      const got: string[] = [];
+      spans.forEach(span => {
+        got.push(span.name);
+      });
 
-    assert.deepEqual(
-      want,
-      got,
-      'The spans order by duration has been violated:\n\tGot:  ' +
-        got.toString() +
-        '\n\tWant: ' +
-        want.toString()
-    );
+      const want = [
+        'cloud.google.com/nodejs/spanner/Database.runStream',
+        'cloud.google.com/nodejs/spanner/Database.run',
+        'cloud.google.com/nodejs/spanner/Transaction.runStream',
+      ];
 
-    // Ensure that each span has the attribute
-    //  SEMATTRS_DB_SYSTEM, set to 'spanner'
-    spans.forEach(span => {
-      assert.equal(
-        span.attributes[SEMATTRS_DB_SYSTEM],
-        'spanner',
-        'Missing DB_SYSTEM attribute'
+      assert.deepEqual(
+        want,
+        got,
+        'The spans order by duration has been violated:\n\tGot:  ' +
+          got.toString() +
+          '\n\tWant: ' +
+          want.toString()
       );
-      assert.equal(
-        span.attributes[SEMATTRS_DB_STATEMENT],
-        undefined,
-        'unexpected DB_STATEMENT attribute without it being toggled'
-      );
+
+      // Ensure that each span has the attribute
+      //  SEMATTRS_DB_SYSTEM, set to 'spanner'
+      spans.forEach(span => {
+        assert.equal(
+          span.attributes[SEMATTRS_DB_SYSTEM],
+          'spanner',
+          'Missing DB_SYSTEM attribute'
+        );
+        assert.equal(
+          span.attributes[SEMATTRS_DB_STATEMENT],
+          undefined,
+          'unexpected DB_STATEMENT attribute without it being toggled'
+        );
+      });
     });
-  });
-
-  it('Closing the client creates the closing span', () => {
-    spanner.close();
-
-    const spans = exporter.getFinishedSpans();
-    // We need to ensure that spans were generated and exported
-    // correctly.
-    assert.ok(spans.length == 1, 'exactly 1 span must have been created');
-    assert.strictEqual(
-      spans[0].name,
-      'cloud.google.com/nodejs/spanner/Spanner.close'
-    );
   });
 });
 
@@ -176,13 +163,14 @@ describe('Extended tracing', () => {
   });
 
   afterEach(async () => {
-    database.close();
     spanner.close();
     exporter.forceFlush();
     exporter.reset();
     await provider.shutdown();
     disableContextAndManager(contextManager);
   });
+
+  after(async () => {});
 
   const methodsTakingSQL = {
     'cloud.google.com/nodejs/spanner/Database.run': true,
@@ -364,6 +352,63 @@ describe('Capturing sessionPool annotations', () => {
         gotEvents.toString() +
         '\n\tWant: ' +
         mandatoryEvents.toString()
+    );
+  });
+});
+
+describe('Close span', () => {
+  const exporter = new InMemorySpanExporter();
+  const sampler = new AlwaysOnSampler();
+
+  const {Spanner} = require('../src');
+
+  const provider = new NodeTracerProvider({
+    sampler: sampler,
+    exporter: exporter,
+  });
+  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  provider.register();
+  setTracerProvider(provider);
+
+  const contextManager = new AsyncHooksContextManager();
+  setGlobalContextManager(contextManager);
+
+  afterEach(async () => {
+    exporter.forceFlush();
+    exporter.reset();
+    await provider.shutdown();
+    disableContextAndManager(contextManager);
+  });
+
+  it('Close span must be emitted', async () => {
+    const spanner = new Spanner({
+      projectId: projectId,
+    });
+    spanner.close();
+
+    const spans = exporter.getFinishedSpans();
+
+    spans.sort((spanA, spanB) => {
+      return spanA.startTime < spanB.startTime;
+    });
+    const gotSpans: string[] = [];
+    spans.forEach(span => {
+      gotSpans.push(span.name);
+    });
+    // We need to ensure that spans were generated and exported
+    // correctly.
+    assert.strictEqual(
+      spans.length,
+      1,
+      'exactly 1 span must have been emitted ' + gotSpans.toString()
+    );
+
+    const got = spans[0].name;
+    const want = 'cloud.google.com/nodejs/spanner/Spanner.close';
+    assert.deepEqual(
+      want,
+      got,
+      'Mismatched span:\n\tGot:  ' + got + '\n\tWant: ' + want
     );
   });
 });

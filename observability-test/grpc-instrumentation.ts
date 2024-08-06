@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 describe('Enabled gRPC instrumentation with sampling on', () => {
   const assert = require('assert');
@@ -30,47 +29,58 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
     instrumentations: [new GrpcInstrumentation()],
   });
   const {
-    startTrace,
     disableContextAndManager,
     setGlobalContextManager,
+    setTracerProvider,
+    startTrace,
   } = require('../src/instrument');
 
-  const contextManager = new AsyncHooksContextManager();
-  setGlobalContextManager(contextManager);
-
+  const projectId = process.env.SPANNER_TEST_PROJECTID || 'test-project';
   const exporter = new InMemorySpanExporter();
   const sampler = new AlwaysOnSampler();
-  const provider = new NodeTracerProvider({
-    sampler: sampler,
-    exporter: exporter,
-  });
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
-  provider.register();
 
-  const projectId = process.env.SPANNER_TEST_PROJECTID || 'test-project';
-  const {Spanner} = require('../src');
-  const spanner = new Spanner({
-    projectId: projectId,
-  });
-  const instance = spanner.instance('test-instance');
-  const database = instance.database('test-db');
+  const {Database, Spanner} = require('../src');
+
+  let provider: typeof NodeTracerProvider;
+  let contextManager: typeof ContextManager;
+  let spanner: typeof Spanner;
+  let database: typeof Database;
 
   beforeEach(async () => {
+    provider = new NodeTracerProvider({
+      sampler: sampler,
+      exporter: exporter,
+    });
+    provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+    provider.register();
+    setTracerProvider(provider);
+
+    contextManager = new AsyncHooksContextManager();
+    setGlobalContextManager(contextManager);
+
+    spanner = new Spanner({
+      projectId: projectId,
+    });
+
+    const instance = spanner.instance('test-instance');
+    database = instance.database('test-db');
+
+    // Warm up session creation.
+    await database.run('SELECT 2');
     // Mimick usual customer usage in which at setup time, the
     // Spanner and Database handles are created once then sit
     // and wait until they service HTTP or gRPC calls that
     // come in say 5+ seconds after the service is fully started.
     // This gives time for the batch session creation to be be completed.
     await new Promise((resolve, reject) => setTimeout(resolve, 100));
-
-    exporter.reset();
   });
 
-  after(async () => {
-    database.close();
+  afterEach(async () => {
     spanner.close();
+    exporter.forceFlush();
+    exporter.reset();
     await provider.shutdown();
-    fini();
+    disableContextAndManager(contextManager);
   });
 
   it('Invoking database methods creates spans: gRPC enabled', () => {
@@ -88,7 +98,7 @@ describe('Enabled gRPC instrumentation with sampling on', () => {
 
       span.end();
 
-      await new Promise((resolve, reject) => setTimeout(resolve, 1900));
+      await new Promise((resolve, reject) => setTimeout(resolve, 600));
       await exporter.forceFlush();
 
       // We need to ensure that spans were generated and exported.
