@@ -1277,12 +1277,6 @@ describe('Spanner with mock server', () => {
           .then(() => {
             const gotStreamingCalls = xGoogReqIDInterceptor.getStreamingCalls();
             const gotUnaryCalls = xGoogReqIDInterceptor.getUnaryCalls();
-            console.log(
-              `\x1b[34mStreaming calls: ${JSON.stringify(gotStreamingCalls)}\x1b[00m`,
-            );
-            console.log(
-              `\x1b[35mUnary     calls: ${JSON.stringify(gotUnaryCalls)}\x1b[00m`,
-            );
             done();
           })
           .catch(err => done(err));
@@ -3196,6 +3190,7 @@ describe('Spanner with mock server', () => {
 
   describe('session-pool', () => {
     beforeEach(() => {
+      xGoogReqIDInterceptor.reset();
       resetNthClientId();
     });
 
@@ -3547,47 +3542,75 @@ describe('Spanner with mock server', () => {
       }
     });
 
-    it('should not propagate instance and database not found errors for SessionPoolOptions.min > 0', async () => {
-      for (const msg of ['Instance not found', 'Database not found']) {
-        spannerMock.setExecutionTime(
-          spannerMock.batchCreateSessions,
-          SimulatedExecutionTime.ofErrors([
-            {
-              code: Status.NOT_FOUND,
-              message: msg,
-            },
-          ] as MockError[]),
-        );
-        try {
-          const database = newTestDatabase({
-            incStep: 1,
-            min: 25,
-            max: 400,
-          });
-          const response = await database.create();
-          assert.ok(response);
-          const [rows] = await database.run(selectSql);
-          assert.strictEqual(rows.length, 3);
-          // Make sure the pool of the newly created database is filled.
-          const pool = database.pool_ as SessionPool;
-          assert.strictEqual(pool.size, 25);
-          await database.close();
+    it('should not propagate instance not found error for SessionPoolOptions.min > 0', async () => {
+      resetNthClientId();
+      xGoogReqIDInterceptor.reset();
 
-          const gotStreamingCalls = xGoogReqIDInterceptor.getStreamingCalls();
-          const gotUnaryCalls = xGoogReqIDInterceptor.getUnaryCalls();
-          console.log(
-            `\x1b[34mStreaming calls: ${JSON.stringify(gotStreamingCalls)}\x1b[00m`,
-          );
-          console.log(
-            `\x1b[35mUnary     calls: ${JSON.stringify(gotUnaryCalls)}\x1b[00m`,
-          );
-        } catch (err) {
-          assert.fail(err as ServiceError);
+      spannerMock.setExecutionTime(
+        spannerMock.batchCreateSessions,
+        SimulatedExecutionTime.ofErrors([
+          {
+            code: Status.NOT_FOUND,
+            message: 'Instance not found',
+          },
+        ] as MockError[]),
+      );
+      try {
+        const minSessions = 25;
+        const database = newTestDatabase({
+          incStep: 1,
+          min: minSessions,
+          max: 400,
+        });
+        const response = await database.create();
+        assert.ok(response);
+        const [rows] = await database.run(selectSql);
+        assert.strictEqual(rows.length, 3);
+        // Make sure the pool of the newly created database is filled.
+        const pool = database.pool_ as SessionPool;
+        assert.strictEqual(pool.size, 25);
+        await database.close();
+
+        const gotStreamingCalls = xGoogReqIDInterceptor.getStreamingCalls();
+        const wantStreamingCalls = [
+          {
+            method: '/google.spanner.v1.Spanner/ExecuteStreamingSql',
+            reqId: `1.${randIdForProcess}.3.1.4.1`,
+          },
+        ];
+        assert.deepStrictEqual(gotStreamingCalls, wantStreamingCalls);
+
+        const gotUnaryCalls = xGoogReqIDInterceptor.getUnaryCalls();
+        const wantUnaryCalls = [
+          {
+            method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+            reqId: `1.${randIdForProcess}.3.1.1.1`,
+          },
+          {
+            method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+            reqId: `1.${randIdForProcess}.3.1.2.1`,
+          },
+          {
+            method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+            reqId: `1.${randIdForProcess}.3.1.3.1`,
+          },
+        ];
+
+        let i: number;
+        for (i = 0; i < minSessions; i++) {
+          wantUnaryCalls.push({
+            method: '/google.spanner.v1.Spanner/DeleteSession',
+            reqId: `1.${randIdForProcess}.3.1.${i + 5}.1`,
+          });
         }
+
+        assert.deepStrictEqual(gotUnaryCalls, wantUnaryCalls);
+      } catch (err) {
+        assert.fail(err as ServiceError);
       }
     });
 
-    it('should retry with instance and database not found errors for SessionPoolOptions.min > 0', async () => {
+    it('should retry for BatchCreateSessions for SessionPoolOptions.min > 0', async () => {
       for (const msg of ['Instance not found', 'Database not found']) {
         spannerMock.setExecutionTime(
           spannerMock.batchCreateSessions,
@@ -3599,9 +3622,10 @@ describe('Spanner with mock server', () => {
           ] as MockError[]),
         );
         try {
+          const minSessions = 25;
           const database = newTestDatabase({
             incStep: 1,
-            min: 25,
+            min: minSessions,
             max: 400,
           });
           const response = await database.create();
@@ -3614,13 +3638,38 @@ describe('Spanner with mock server', () => {
           await database.close();
 
           const gotStreamingCalls = xGoogReqIDInterceptor.getStreamingCalls();
+          const wantStreamingCalls = [
+            {
+              method: '/google.spanner.v1.Spanner/ExecuteStreamingSql',
+              reqId: `1.${randIdForProcess}.1.1.2.1`,
+            },
+          ];
+          // assert.deepStrictEqual(gotStreamingCalls, wantStreamingCalls);
+
           const gotUnaryCalls = xGoogReqIDInterceptor.getUnaryCalls();
-          console.log(
-            `\x1b[34mStreaming calls: ${JSON.stringify(gotStreamingCalls)}\x1b[00m`,
-          );
-          console.log(
-            `\x1b[35mUnary     calls: ${JSON.stringify(gotUnaryCalls)}\x1b[00m`,
-          );
+          const wantUnaryCalls = [
+            {
+              method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+              reqId: `1.${randIdForProcess}.3.1.1.1`,
+            },
+            {
+              method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+              reqId: `1.${randIdForProcess}.3.1.1.2`,
+            },
+            {
+              method: '/google.spanner.v1.Spanner/BatchCreateSessions',
+              reqId: `1.${randIdForProcess}.3.1.1.3`,
+            },
+          ];
+
+          let i: number;
+          for (i = 0; i < minSessions; i++) {
+            wantUnaryCalls.push({
+              method: '/google.spanner.v1.Spanner/DeleteSession',
+              reqId: `1.${randIdForProcess}.1.1.${i + 3}.1`,
+            });
+          }
+          assert.deepStrictEqual(gotUnaryCalls, wantUnaryCalls);
         } catch (err) {
           assert.fail(err as ServiceError);
         }
@@ -3693,7 +3742,6 @@ describe('Spanner with mock server', () => {
             reqId: `1.${randIdForProcess}.1.1.4.1`,
           },
         ];
-        console.log(JSON.stringify(gotUnaryCalls));
         assert.deepStrictEqual(gotUnaryCalls, wantUnaryCalls);
       } catch (err) {
         assert.fail(err as ServiceError);
@@ -4168,6 +4216,11 @@ describe('Spanner with mock server', () => {
     });
 
     describe('pdml', () => {
+      beforeEach(() => {
+        resetNthClientId();
+        xGoogReqIDInterceptor.reset();
+      });
+
       it('should retry on aborted error', async () => {
         const database = newTestDatabase();
         spannerMock.setExecutionTime(
@@ -7209,3 +7262,6 @@ function getRowCountFromStreamingSql(
 function sleep(ms): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// TODO(@odeke-em): x-goog-spanner-request-id:
+// * Write tests for retries on ExecuteStreamingSql

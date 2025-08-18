@@ -127,7 +127,7 @@ interface withNextNthRequest {
 }
 
 interface withMetadataWithRequestId {
-  _nthClientId: number;
+  _clientId: number;
   _channelId: number;
 }
 
@@ -169,7 +169,7 @@ function _metadataWithRequestId(
   let clientId = 1;
   let channelId = 1;
   if (database) {
-    clientId = database._nthClientId || 1;
+    clientId = database._clientId || 1;
     channelId = database._channelId || 1;
   }
   withReqId[X_GOOG_SPANNER_REQUEST_ID_HEADER] = craftRequestId(
@@ -240,6 +240,11 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
         const reqIdStr = metadata.get(
           X_GOOG_SPANNER_REQUEST_ID_HEADER,
         )[0] as string;
+        if (!reqIdStr || !nthRequester_) {
+          next(metadata, listener);
+          return;
+        }
+
         let reqIdStoreKey = methodDefinition.path + reqIdStr;
         let reqId: XGoogRequestId;
         if (needsManualGAXRetry) {
@@ -254,10 +259,12 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
             reqIdStoreKey = methodDefinition.path + reqId.toString();
             updatedAttempt.increment();
             mapOfReqIdAttempts[reqIdStoreKey] = updatedAttempt;
+            mapOfReqIdNthRequests.delete(reqIdStoreKey); // Clear the old value since it has been replaced.
           } else if (updatedNthRequest) {
             reqId.setNthRequest(updatedNthRequest).setAttempt(1);
             metadata.set(X_GOOG_SPANNER_REQUEST_ID_HEADER, reqId.toString());
             mapOfReqIdNthRequests.delete(reqIdStoreKey); // Clear the old value since it has been replaced.
+            mapOfReqIdAttempts.delete(reqIdStoreKey);
           }
         }
 
@@ -278,16 +285,25 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
               // Succeeded.
               // Clear any prior stored values just in case there were any.
               mapOfReqIdAttempts.delete(reqIdStoreKey);
-            } else if (statusNeedsAttemptIncrement(status.code)) {
+              mapOfReqIdNthRequests.delete(reqIdStoreKey);
+              next(status);
+              return;
+            }
+
+            if (statusNeedsAttemptIncrement(status.code)) {
               // Record the next attempt for later lookup.
               const attemptCounter = new AtomicCounter(1 + reqId.getAttempt());
               mapOfReqIdAttempts[reqIdStoreKey] = attemptCounter;
               reqId.setAttempt(attemptCounter.value());
               metadata.set(X_GOOG_SPANNER_REQUEST_ID_HEADER, reqId.toString());
+              mapOfReqIdNthRequests.delete(reqIdStoreKey);
             } else {
+              const nthReq = nthRequester_._nextNthRequest();
               // This needs a fresh request hence We just need to bump up the nthRequest and attempt=1
-              mapOfReqIdNthRequests[reqIdStoreKey] =
-                nthRequester_._nextNthRequest();
+              reqId.setNthRequest(nthReq).setAttempt(1);
+              mapOfReqIdNthRequests[reqIdStoreKey] = nthReq;
+              metadata.set(X_GOOG_SPANNER_REQUEST_ID_HEADER, reqId.toString());
+              mapOfReqIdAttempts.delete(reqIdStoreKey);
             }
 
             next(status);
@@ -298,6 +314,7 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
       },
 
       sendMessage: function (message, next) {
+        // console.log(`\x1b[31msendMessage\x1b[00m: ${JSON.stringify(message)}`);
         next(message);
       },
 
