@@ -1739,6 +1739,7 @@ class Spanner extends GrpcService {
 
           case false: {
             const res = requestFn(...args);
+            console.log('typeof:: ' + res.constructor.name);
             const stream = res as EventEmitter;
             if (stream) {
               stream.on('error', err => {

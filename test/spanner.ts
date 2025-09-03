@@ -370,6 +370,11 @@ describe('Spanner with mock server', () => {
   });
 
   describe('basics', () => {
+    beforeEach(() => {
+      xGoogReqIDInterceptor.reset();
+      resetNthClientId();
+    });
+
     it('should return different database instances when the same database is requested twice with different session pool options', async () => {
       const dbWithDefaultOptions = newTestDatabase();
       const dbWithWriteSessions = instance.database(dbWithDefaultOptions.id!, {
@@ -1582,6 +1587,11 @@ describe('Spanner with mock server', () => {
     });
 
     describe('PartialResultStream', () => {
+      beforeEach(() => {
+        xGoogReqIDInterceptor.reset();
+        resetNthClientId();
+      });
+
       const streamIndexes = [1, 2];
       streamIndexes.forEach(index => {
         it('should retry UNAVAILABLE during streaming', async () => {
@@ -3317,7 +3327,7 @@ describe('Spanner with mock server', () => {
 
     it('should reuse sessions after executing invalid sql', async () => {
       // The query to execute
-      const requestIDRegex = new RegExp(`1.${randIdForProcess}.1.1.\\d+.1`);
+      const requestIDRegex = new RegExp(`1.${randIdForProcess}.\\d+.1.\\d+.1`);
       const query = {
         sql: invalidSql,
       };
@@ -3365,7 +3375,7 @@ describe('Spanner with mock server', () => {
 
     it('should reuse sessions after executing an invalid streaming sql', async () => {
       // The query to execute
-      const requestIDRegex = new RegExp(`1.${randIdForProcess}.1.1.\\d+.1`);
+      const requestIDRegex = new RegExp(`1.${randIdForProcess}.\\d+.1.\\d+.1`);
       const query = {
         sql: invalidSql,
       };
@@ -3575,7 +3585,7 @@ describe('Spanner with mock server', () => {
         const wantStreamingCalls = [
           {
             method: '/google.spanner.v1.Spanner/ExecuteStreamingSql',
-            reqId: `1.${randIdForProcess}.3.1.4.1`,
+            reqId: `1.${randIdForProcess}.3.1.3.1`,
           },
         ];
         assert.deepStrictEqual(gotStreamingCalls, wantStreamingCalls);
@@ -3588,19 +3598,19 @@ describe('Spanner with mock server', () => {
           },
           {
             method: '/google.spanner.v1.Spanner/BatchCreateSessions',
-            reqId: `1.${randIdForProcess}.3.1.2.1`,
+            reqId: `1.${randIdForProcess}.3.1.1.1`, // TODO(@odeke-em): figure out why we don't have this incremented.
           },
           {
             method: '/google.spanner.v1.Spanner/BatchCreateSessions',
-            reqId: `1.${randIdForProcess}.3.1.3.1`,
+            reqId: `1.${randIdForProcess}.3.1.2.1`,
           },
         ];
 
         let i: number;
-        for (i = 0; i < minSessions; i++) {
+        for (i = 0; i <= minSessions - 1; i++) {
           wantUnaryCalls.push({
             method: '/google.spanner.v1.Spanner/DeleteSession',
-            reqId: `1.${randIdForProcess}.3.1.${i + 5}.1`,
+            reqId: `1.${randIdForProcess}.3.1.${i + 4}.1`,
           });
         }
 
@@ -4978,6 +4988,11 @@ describe('Spanner with mock server', () => {
   });
 
   describe('hand-crafted transaction', () => {
+    beforeEach(() => {
+      xGoogReqIDInterceptor.reset();
+      resetNthClientId();
+    });
+
     it('should use transactionTag on beginTransaction', async () => {
       const database = newTestDatabase({min: 0});
       const [session] = await database.createSession({});

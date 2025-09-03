@@ -227,16 +227,229 @@ const knownUnaryGAXMethods = {
 const mapOfReqIdAttempts = new Map();
 const mapOfReqIdNthRequests = new Map();
 
-export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
+import {CallOptions} from 'google-gax';
+
+export function xgenerateRequestIdInterceptor(
+  nthRequester_: nthRequester,
+  gaxOptions?: CallOptions,
+) {
+  const maxRetries = 3;
+  const interceptor = function (options, nextCall) {
+    const methodDefinition = options.method_definition;
+    const needsManualGAXRetry = knownUnaryGAXMethods[methodDefinition.path];
+    if (!needsManualGAXRetry || !nthRequester_) {
+      return passThroughInterceptor(options, nextCall);
+    }
+
+    let savedMetadata;
+    let savedSendMessage;
+    let savedReceiveMessage;
+    let savedMessageNext;
+
+    const requester = {
+      start: function (metadata, listener, next) {
+        savedMetadata = metadata;
+        const reqIdStr = metadata.get(
+          X_GOOG_SPANNER_REQUEST_ID_HEADER,
+        )[0] as string;
+
+        const newListener = {
+          onReceiveMessage: function (message, next) {
+            console.log(
+              `onReceiveMessage: ${methodDefinition.path}: ${reqIdStr} ${JSON.stringify(message)}`,
+            );
+            savedReceiveMessage = message;
+            savedMessageNext = next;
+          },
+          onReceiveStatus: function (status, next) {
+            console.log(
+              `onReceiveStatus: ${methodDefinition.path} ${reqIdStr}`,
+            );
+            let retries = 0;
+            const retry = function (message, metadata) {
+              retries++;
+              const newCall = nextCall(options);
+              newCall.start(metadata, {
+                onReceiveMessage: function (message) {
+                  savedReceiveMessage = message;
+                },
+                onReceiveStatus: function (status) {
+                  if (status.code !== grpc.status.OK) {
+                    if (retries <= maxRetries) {
+                      retry(message, metadata);
+                    } else {
+                      savedMessageNext(savedReceiveMessage);
+                      next(status);
+                    }
+                  } else {
+                    savedMessageNext(savedReceiveMessage);
+                    next({code: grpc.status.OK});
+                  }
+                },
+              });
+            };
+            if (status.code !== grpc.status.OK) {
+              retry(savedSendMessage, savedMetadata);
+            } else {
+              console.log(
+                `onReceive->onReceiveMessage: ${methodDefinition.path}: ${reqIdStr}`,
+              );
+              savedMessageNext(savedReceiveMessage);
+              next(status);
+            }
+          },
+        };
+        next(metadata, newListener);
+      },
+      sendMessage: function (message, next) {
+        savedSendMessage = message;
+        next(message);
+      },
+    };
+    return new grpc.InterceptingCall(nextCall(options), requester);
+  };
+  return interceptor;
+}
+
+export function generateRequestIdInterceptor(
+  nthRequester_: nthRequester,
+  gaxOptions?: CallOptions,
+) {
+  const maxRetries = (gaxOptions || {}).maxRetries || 4;
+
+  return (options, nextCall) => {
+    const methodDefinition = options.method_definition;
+    const needsManualGAXRetry = knownUnaryGAXMethods[methodDefinition.path];
+    if (!needsManualGAXRetry || !nthRequester_) {
+      return passThroughInterceptor(options, nextCall);
+    }
+
+    let savedMetadata;
+    let savedMessageNext;
+    let savedSendMessage;
+    let savedReceiveMessage;
+
+    const requester = {
+      start: (metadata, listener, next) => {
+        const reqIdStr = metadata.get(
+          X_GOOG_SPANNER_REQUEST_ID_HEADER,
+        )[0] as string;
+
+        if (!reqIdStr) {
+          next(metadata, listener);
+          return;
+        }
+
+        console.log(
+          `${methodDefinition.path} ${reqIdStr}: ${JSON.stringify(metadata)}`,
+        );
+        savedMetadata = metadata;
+        const newListener = {
+          onReceiveMessage: function (message, next) {
+            savedReceiveMessage = message;
+            savedMessageNext = next;
+          },
+          onReceiveStatus: function (status, next) {
+            let retries = 0;
+            const retry = function (message, metadata) {
+              retries++;
+              const newCall = nextCall(options);
+
+              newCall.start(metadata, {
+                onReceiveMessage: function (message) {
+                  console.log(`onReceiveMessage: ${message}`);
+                  savedReceiveMessage = message;
+                  savedMessageNext = next;
+                },
+                onReceiveStatus: function (status, next) {
+                  console.log(
+                    `onReceiveStatus: ${methodDefinition.path}::${reqIdStr} ${retries}`,
+                  );
+                  if (!statusNeedsAttemptIncrement(status.code)) {
+                    savedMessageNext(savedReceiveMessage);
+                    next(status);
+                    return;
+                  }
+
+                  if (retries > maxRetries) {
+                    savedMessageNext(savedReceiveMessage);
+                    next(status);
+                    return;
+                  }
+
+                  // TODO(@odeke-em): pull in the gaxOptions settings so as to
+                  // use the retry mechanisms.
+
+                  // Now update the request-id value.
+                  const reqId = new XGoogRequestId(reqIdStr);
+                  reqId.setAttempt(retries + 1);
+                  console.log(
+                    `\x1b[34mPrior req-id: ${reqIdStr}:: new req-id: ${reqId.toString()}; retries: ${retries}\x1b[00m`,
+                  );
+                  savedMetadata.set(
+                    X_GOOG_SPANNER_REQUEST_ID_HEADER,
+                    reqId.toString(),
+                  );
+                  console.log(`retrying: ${retries}`);
+                  retry(savedSendMessage, savedMetadata);
+                },
+              });
+            };
+
+            if (!statusNeedsAttemptIncrement(status.code)) {
+              savedMessageNext(savedReceiveMessage);
+              next(status);
+            } else {
+              retry(savedSendMessage, savedMetadata);
+            }
+          },
+        };
+        next(metadata, newListener);
+      },
+
+      sendMessage: function (message, next) {
+        savedSendMessage = message;
+        next(message);
+      },
+    };
+
+    return new grpc.InterceptingCall(nextCall(options), requester);
+  };
+}
+
+var passThroughInterceptor = function (options, nextCall) {
+  return new grpc.InterceptingCall(nextCall(options), {
+    start: function (metadata, listener, next) {
+      next(metadata, listener);
+    },
+    sendMessage: function (message, next) {
+      next(message);
+    },
+    halfClose: function (next) {
+      next();
+    },
+    cancel: function (next) {
+      next();
+    },
+  });
+};
+
+/*
+export function xGenerateRequestIdInterceptor(nthRequester_: nthRequester) {
   return (options, nextCall) => {
     const methodDefinition = options.method_definition;
     // Detect if it is a GAX initiated call that is unary and hence needs manual retries,
     // given the fact that google-gax doesn't yet offer flexible call options like the
     // Go and Java libraries offer to intercept retries.
     const needsManualGAXRetry = knownUnaryGAXMethods[methodDefinition.path];
+    var savedMetadata;
+    var savedMessageNext;
+    var savedSendMessage;
+    var savedReceiveMessage;
 
     return new grpc.InterceptingCall(nextCall(options), {
       start: (metadata, listener, next) => {
+        savedMetadata = metadata;
         const reqIdStr = metadata.get(
           X_GOOG_SPANNER_REQUEST_ID_HEADER,
         )[0] as string;
@@ -268,7 +481,7 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
           }
         }
 
-        const newListener = {
+        const requester = {
           onReceiveMetadata: function (metadata, next) {
             next(metadata);
           },
@@ -280,6 +493,32 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
               next(status);
               return;
             }
+            var retries = 0;
+            var retry = function(message, metadata) {
+                retries++;
+                var newCall = nextCall(options);
+                newCall.start(metadata, {
+                    onReceiveMessage: function(message) {
+                        savedReceiveMessage = message;
+                        savedMessageNext = next;
+                    },
+                    onReceiveStatus: function(status, next) {
+                        if (status.code === grpc.status.OK) {
+                            savedMessageNext();
+                            next(status);
+                            return;
+                        }
+
+
+                        if (retries <= maxRetries) {
+                            retry(savedSendMessage, metadata);
+                        } else {
+                            savedMessageNext(savedReceiveMessage);
+                            next(status);
+                        }
+                    },
+                });
+            };
 
             if (status.code === grpc.status.OK) {
               // Succeeded.
@@ -305,16 +544,15 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
               metadata.set(X_GOOG_SPANNER_REQUEST_ID_HEADER, reqId.toString());
               mapOfReqIdAttempts.delete(reqIdStoreKey);
             }
-
-            next(status);
           },
         };
 
-        next(metadata, newListener);
+        next(metadata, requester);
       },
 
       sendMessage: function (message, next) {
         // console.log(`\x1b[31msendMessage\x1b[00m: ${JSON.stringify(message)}`);
+        savedSendMessage = message;
         next(message);
       },
 
@@ -328,6 +566,7 @@ export function generateRequestIdInterceptor(nthRequester_: nthRequester) {
     });
   };
 }
+*/
 
 // statusNeedsAttemptIncrement returns true if for a retry this could be an idempotent
 // request for which we should increment the attempt value instead of bumping up the nthRequest.
