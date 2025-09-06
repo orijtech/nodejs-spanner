@@ -118,6 +118,7 @@ import {
   X_GOOG_SPANNER_REQUEST_ID_HEADER,
   craftRequestId,
   newAtomicCounter,
+  nextSpannerClientId,
 } from './request_id_header';
 
 export type GetDatabaseRolesCallback = RequestCallback<
@@ -482,11 +483,10 @@ class Database extends common.GrpcServiceObject {
 
     this.request = instance.request;
     this._nthRequest = newAtomicCounter(0);
-    if (this.parent && this.parent.parent) {
-      this._clientId = (this.parent.parent as Spanner)._nthClientId;
-    } else {
-      this._clientId = instance._nthClientId;
-    }
+    // We assign a new clientId here because for Javascript, all client operations
+    // are effectively performed on the database handle itself, unlike other languages
+    // where instantiation is directly to a database handle per .newClient().
+    this._clientId = nextSpannerClientId();
     this._observabilityOptions = instance._observabilityOptions;
     this.commonHeaders_ = getCommonHeaders(
       this.formattedName_,
@@ -768,6 +768,8 @@ class Database extends common.GrpcServiceObject {
     if (!priorMetadata) {
       priorMetadata = {};
     }
+
+    // TODO(@odeke-em): pass the nthReqId updater into the incrementor.
     const withReqId = {
       ...priorMetadata,
     };

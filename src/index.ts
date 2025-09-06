@@ -92,7 +92,6 @@ import {
 import {
   attributeXGoogSpannerRequestIdToActiveSpan,
   injectRequestIDIntoError,
-  nextSpannerClientId,
   nthRequester,
   generateRequestIdInterceptor,
 } from './request_id_header';
@@ -322,7 +321,6 @@ class Spanner extends GrpcService {
   private _universeDomain: string;
   private _isInSecureCredentials: boolean;
   private static _isAFEServerTimingEnabled: boolean | undefined;
-  readonly _nthClientId: number;
 
   /**
    * Placeholder used to auto populate a column with the commit timestamp.
@@ -496,7 +494,6 @@ class Spanner extends GrpcService {
       this._observabilityOptions?.enableEndToEndTracing,
     );
     ensureInitialContextManagerSet();
-    this._nthClientId = nextSpannerClientId();
     this._universeDomain = universeEndpoint;
     this.configureMetrics_(options.disableBuiltInMetrics);
   }
@@ -1739,7 +1736,6 @@ class Spanner extends GrpcService {
 
           case false: {
             const res = requestFn(...args);
-            console.log('typeof:: ' + res.constructor.name);
             const stream = res as EventEmitter;
             if (stream) {
               stream.on('error', err => {

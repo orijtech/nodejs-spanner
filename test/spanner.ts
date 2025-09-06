@@ -3585,7 +3585,7 @@ describe('Spanner with mock server', () => {
         const wantStreamingCalls = [
           {
             method: '/google.spanner.v1.Spanner/ExecuteStreamingSql',
-            reqId: `1.${randIdForProcess}.3.1.3.1`,
+            reqId: `1.${randIdForProcess}.1.1.3.1`,
           },
         ];
         assert.deepStrictEqual(gotStreamingCalls, wantStreamingCalls);
@@ -3594,15 +3594,15 @@ describe('Spanner with mock server', () => {
         const wantUnaryCalls = [
           {
             method: '/google.spanner.v1.Spanner/BatchCreateSessions',
-            reqId: `1.${randIdForProcess}.3.1.1.1`,
+            reqId: `1.${randIdForProcess}.1.1.1.1`,
           },
           {
             method: '/google.spanner.v1.Spanner/BatchCreateSessions',
-            reqId: `1.${randIdForProcess}.3.1.1.1`, // TODO(@odeke-em): figure out why we don't have this incremented.
+            reqId: `1.${randIdForProcess}.2.1.1.1`,
           },
           {
             method: '/google.spanner.v1.Spanner/BatchCreateSessions',
-            reqId: `1.${randIdForProcess}.3.1.2.1`,
+            reqId: `1.${randIdForProcess}.1.1.2.1`,
           },
         ];
 
@@ -3610,7 +3610,7 @@ describe('Spanner with mock server', () => {
         for (i = 0; i <= minSessions - 1; i++) {
           wantUnaryCalls.push({
             method: '/google.spanner.v1.Spanner/DeleteSession',
-            reqId: `1.${randIdForProcess}.3.1.${i + 4}.1`,
+            reqId: `1.${randIdForProcess}.1.1.${i + 4}.1`,
           });
         }
 
